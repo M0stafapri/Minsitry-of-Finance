@@ -1,0 +1,168 @@
+/* Custom Scrollbar Styles */
+.scroll-behavior-smooth {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Remove default smooth scroll to use custom implementation */
+  scroll-behavior: auto;
+  /* Prevent scroll chaining */
+  overscroll-behavior: contain;
+}
+
+/* Smooth height transition for expand/collapse */
+.scroll-behavior-smooth {
+  transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Custom scrollbar appearance */
+.scrollbar-custom::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-track {
+  background: #F3F4F6;
+  border-radius: 4px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb {
+  background-color: rgba(209, 213, 219, 0.7);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.9);
+}
+
+/* Firefox scrollbar */
+@supports (scrollbar-width: thin) {
+  .scrollbar-custom {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(209, 213, 219, 0.7) #F3F4F6;
+  }
+}
+
+/* Specific styles for trip-cell-scrollable */
+.trip-cell-scrollable {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: auto;
+  transition: all 0.3s ease;
+  /* Add explicit styling for expanded states */
+  outline: none;
+  padding-left: 2px;
+  padding-right: 2px;
+  will-change: transform, scroll-position;
+  transition: background-color 0.2s ease;
+  contain: strict;
+  touch-action: pan-y;
+}
+
+/* Enhance scrolling experience for expanded cells */
+.trip-cell-scrollable[data-expanded="true"] {
+  scroll-padding: 4px;
+  padding-right: 6px;
+  margin-right: -6px;
+  will-change: transform, scroll-position;
+  transition: max-height 0.3s ease-in-out, padding 0.3s ease;
+  touch-action: pan-y;
+}
+
+/* تحسين التركيز */
+.trip-cell-scrollable[data-expanded="true"]:focus {
+  outline: none;
+  background-color: rgba(243, 244, 246, 0.5);
+}
+
+/* Slow down mouse wheel scroll */
+@supports (-moz-appearance:none) {
+  .scroll-behavior-smooth, .trip-cell-scrollable {
+    scrollbar-width: thin;
+    scroll-behavior: smooth;
+    /* Firefox specific scroll speed */
+    scrollbar-color: rgba(209, 213, 219, 0.7) #F3F4F6;
+  }
+}
+
+@media screen and (-webkit-min-device-pixel-ratio:0) {
+  .scroll-behavior-smooth, .trip-cell-scrollable {
+    /* Webkit browsers scroll speed */
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+  }
+}
+
+/* إزالة بعض الخصائص التي قد تتداخل مع التمرير المخصص */
+.trip-cell-scrollable {
+  /* إزالة خصائص scroll-snap قد تؤثر على سلاسة التمرير */
+  scroll-snap-type: none;
+  scroll-snap-points-y: none;
+}
+
+/* Target the container to modify wheel event behavior */
+.momentum-scroll, .trip-cell-scrollable {
+  -webkit-overflow-scrolling: touch;
+  /* Remove default smooth scroll to use custom implementation */
+  scroll-behavior: auto;
+  /* إضافة تأثير الزخم للتمرير على الأجهزة اللمسية */
+  overscroll-behavior: contain;
+}
+
+/* إزالة خصائص scroll-snap قد تؤثر على سلاسة التمرير */
+.scroll-behavior-smooth > *, .trip-cell-scrollable > * {
+  scroll-snap-align: none;
+  scroll-snap-stop: normal;
+  scroll-margin-top: 4px;
+  scroll-margin-bottom: 4px;
+}
+
+/* Additional scroll speed reduction */
+.scroll-behavior-smooth, .trip-cell-scrollable {
+  scroll-padding: 5px;
+  /* Add scroll dampening */
+  overscroll-behavior-y: contain;
+  /* إزالة خصائص قد تتداخل مع التمرير المخصص */
+  scroll-snap-points-y: none;
+  /* Add smooth stop at boundaries */
+  overscroll-behavior: contain;
+}
+
+/* تحسين الأداء عن طريق إزالة الرسوم المتحركة غير الضرورية */
+@media (prefers-reduced-motion: no-preference) {
+  .scroll-behavior-smooth, .trip-cell-scrollable {
+    /* إزالة الرسوم المتحركة التي قد تتسبب في تباطؤ التمرير */
+    animation: none;
+  }
+}
+
+/* Expand/Collapse button transition */
+.expand-transition {
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* إضافة الدعم للأجهزة اللمسية */
+@media (hover: none) and (pointer: coarse) {
+  .trip-cell-scrollable {
+    /* تحسين تجربة اللمس */
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  
+  /* زيادة حجم المنطقة القابلة للنقر للأزرار على الأجهزة اللمسية */
+  .expand-transition {
+    min-height: 30px;
+    min-width: 30px;
+  }
+}
+
+/* تحسين أداء التمرير */
+@media (prefers-reduced-motion: no-preference) {
+  .trip-cell-scrollable {
+    /* استخدام GPU للتمرير */
+    transform: translateZ(0);
+    /* تحسين أداء CSS */
+    backface-visibility: hidden;
+  }
+} 

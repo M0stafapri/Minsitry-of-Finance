@@ -1,0 +1,971 @@
+import React from "react";
+import { motion } from "framer-motion";
+import { Plus, Search, Edit, Trash2, CheckCircle2, List, Grid } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { PermissionButton, withPermissionCheck } from "@/components/auth";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/components/ui/use-toast";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import EmployeeDetailsDialog from "@/features/employees/components/EmployeeDetailsDialog";
+import { checkDuplicateEmployee } from "@/features/employees/utils";
+
+const positions = [
+  "مدير عام",
+  "مدير مبيعات",
+  "مدير تسويق",
+  "مدير موارد بشرية",
+  "منسق رحلات",
+  "مسؤول حجوزات",
+  "محاسب",
+  "مندوب مبيعات",
+  "سكرتير تنفيذي",
+  "موظف خدمة عملاء",
+  "مسؤول علاقات عامة",
+  "مدير عمليات",
+  "مشرف رحلات",
+  "مسؤول تذاكر",
+  "مدير تطوير أعمال",
+  "مدير الحركة",
+  "المدير التنفيذي"
+];
+
+function generateEmployeeId(employees) {
+  const lastEmployee = employees[0];
+  if (!lastEmployee) return "EM-001";
+  
+  const lastNumber = parseInt(lastEmployee.employeeId.split("-")[1]);
+  return `EM-${String(lastNumber + 1).padStart(3, "0")}`;
+}
+
+function validatePhoneNumbers(phones) {
+  if (!phones) return true; // Empty phone numbers are valid
+  const phoneArray = phones.split('\n').map(phone => phone.trim()).filter(phone => phone.length > 0);
+  return phoneArray.length === 0 || phoneArray.every(phone => /^\d{11}$/.test(phone));
+}
+
+function Employees() {
+  const [employees, setEmployees] = useLocalStorage("employees", [
+    {
+      id: 1,
+      name: "أحمد محمد",
+      employeeId: "EM-001",
+      personalId: "12345678901",
+      username: "ahmed",
+      password: "123456",
+      position: "مدير المبيعات",
+      hireDate: "2023-01-15",
+      completedTrips: 45,
+      salary: 5000,
+      commission: 2.5,
+      managedPhones: "01234567890\n01234567891",
+      identityDoc: null,
+      cvDoc: null
+    },
+  ]);
+
+  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+  const [employeeToDelete, setEmployeeToDelete] = React.useState(null);
+  const [employeeToUpdate, setEmployeeToUpdate] = React.useState(null);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [selectedEmployee, setSelectedEmployee] = React.useState(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = React.useState(false);
+  const [currentEmployee, setCurrentEmployee] = React.useState(null);
+  // Definir los roles disponibles en el sistema
+  const systemRoles = [
+    { id: "admin", name: "مدير النظام" },
+    { id: "manager", name: "مدير تنفيذي" },
+    { id: "employee", name: "موظف" },
+    { id: "sales_manager", name: "مسؤول مبيعات" },
+    { id: "accountant", name: "محاسب" },
+    { id: "driver", name: "سائق" }
+  ];
+  const [statusFilter, setStatusFilter] = React.useState("all");
+  const [displayMode, setDisplayMode] = React.useState("list");
+  const [formData, setFormData] = React.useState({
+    name: "", // إضافة حقل الاسم
+    username: "",
+    password: "",
+    personalId: "",
+    position: "",
+    hireDate: "",
+    salary: "",
+    commission: "",
+    managedPhones: "",
+    identityDoc: null,
+    cvDoc: null,
+    status: "active",
+    terminationDate: "",
+    role: "employee" // إضافة حقل الدور الافتراضي
+  });
+  
+  // حالة إظهار/إخفاء كلمة المرور
+  const [showPassword, setShowPassword] = React.useState(false);
+
+  const filteredEmployees = React.useMemo(() => {
+    // First filter by status if needed
+    const statusFiltered = statusFilter === "all" 
+      ? employees 
+      : employees.filter(employee => employee.status === statusFilter);
+    
+    // Then filter by search term
+    return statusFiltered.filter((employee) =>
+      Object.values(employee).some(
+        (value) =>
+          typeof value === "string" &&
+          value.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    );
+  }, [employees, searchTerm, statusFilter]);
+
+  // Función original de añadir empleado
+  const _handleAdd = () => {
+    setCurrentEmployee(null);
+    setFormData({
+      name: "",
+      username: "",
+      password: "",
+      personalId: "",
+      position: positions[0],
+      hireDate: new Date().toISOString().split("T")[0],
+      salary: "",
+      commission: "",
+      managedPhones: "",
+      identityDoc: null,
+      cvDoc: null,
+      status: "active",
+      terminationDate: "",
+      role: "employee"
+    });
+    setIsDialogOpen(true);
+  };
+  
+  // Función protegida con verificación de permisos
+  const handleAdd = withPermissionCheck(_handleAdd, "employees", "add");
+
+  // Función original de editar empleado
+  const _handleEdit = (employee) => {
+    // تعيين معرف المستخدم للتحديث - سنستخدم خدعة مؤقتة حتى نقوم بتحديث النظام
+    // في حالة عدم وجود userId نفترض أن معرف المستخدم هو نفسه معرف الموظف
+    // يجب تحديث هذا لاحقًا عن طريق جلب البيانات من قاعدة البيانات
+    const userIdToUse = employee.userId || employee.id || 1;
+    
+    setCurrentEmployee({
+      ...employee,
+      userId: userIdToUse  
+    });
+    
+    setFormData({
+      name: employee.name,
+      username: employee.username,
+      password: employee.password,
+      personalId: employee.personalId,
+      position: employee.position,
+      hireDate: employee.hireDate || "",
+      salary: employee.salary,
+      commission: employee.commission,
+      managedPhones: employee.managedPhones || "",
+      status: employee.status || "active",
+      userId: userIdToUse  
+    });
+    
+    setIsDialogOpen(true);
+    setUpdateMode(true);
+    
+    // سجل للتشخيص
+    console.log('تعديل الموظف مع معرف المستخدم:', userIdToUse);
+  };
+  
+  // Función protegida con verificación de permisos
+  const handleEdit = withPermissionCheck(_handleEdit, "employees", "edit");
+
+  // Función original de eliminar empleado
+  const _handleDelete = (employee) => {
+    setEmployeeToDelete(employee);
+    setIsDeleteDialogOpen(true);
+  };
+  
+  // Función protegida con verificación de permisos
+  const handleDelete = withPermissionCheck(_handleDelete, "employees", "delete");
+
+  const handleRowClick = (employee) => {
+    setSelectedEmployee(employee);
+    setIsDetailsDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    setEmployees(employees.filter((emp) => emp.id !== employeeToDelete.id));
+    setIsDeleteDialogOpen(false);
+    toast({
+      title: "تم حذف الموظف",
+      description: "تم حذف الموظف بنجاح",
+    });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    // Validar que los números de teléfono tengan el formato correcto
+    if (formData.managedPhones && !validatePhoneNumbers(formData.managedPhones)) {
+      toast({
+        title: "خطأ في أرقام الهواتف",
+        description: "يجب أن تكون أرقام الهواتف مكونة من 11 رقم",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Validar que el rol seleccionado sea válido
+    const roleIsValid = systemRoles.some(role => role.id === formData.role);
+    if (!roleIsValid) {
+      // Si el rol no es válido, usar el rol predeterminado (employee)
+      const updatedFormData = { ...formData, role: "employee" };
+      setFormData(updatedFormData);
+      
+      toast({
+        title: "تم تعديل الدور",
+        description: "تم تعيين دور الموظف إلى 'موظف' لأن الدور المحدد غير موجود في قائمة الأدوار المتاحة",
+        variant: "warning",
+        duration: 3000
+      });
+    }
+
+    // Validate username (English only)
+    if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      toast({
+        title: "خطأ في اسم المستخدم",
+        description: "اسم المستخدم يجب أن يحتوي على حروف إنجليزية وأرقام فقط",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Validate phone numbers
+    if (!validatePhoneNumbers(formData.managedPhones)) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "كل رقم هاتف يجب أن يتكون من 11 رقم",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check for duplicates for both new and existing employees
+    const { hasDuplicates, errors } = checkDuplicateEmployee(employees, formData, currentEmployee);
+    if (hasDuplicates) {
+      toast({
+        title: "خطأ في البيانات",
+        description: (
+          <div className="space-y-2">
+            <p>يوجد بيانات مكررة:</p>
+            <ul className="list-disc list-inside space-y-1">
+              {errors.map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
+          </div>
+        ),
+        variant: "destructive",
+        duration: 5000,
+      });
+      return;
+    }
+
+    if (currentEmployee) {
+      const updatedEmployee = { 
+        ...currentEmployee, 
+        ...formData
+      };
+      setEmployeeToUpdate(updatedEmployee);
+      setIsUpdateDialogOpen(true);
+    } else {
+      // إنشاء موظف جديد وحساب في قاعدة البيانات
+      const createUserAndEmployee = async () => {
+        try {
+          // إعداد بيانات الإرسال
+          const userData = {
+            name: formData.name, 
+            username: formData.username,
+            password: formData.password,
+            personalId: formData.personalId,
+            position: formData.position,
+            hireDate: formData.hireDate,
+            salary: formData.salary,
+            commission: formData.commission,
+            managedPhones: formData.managedPhones,
+            status: formData.status,
+            role: formData.role
+          };
+
+          // إظهار رسالة للمستخدم بأن العملية جارية
+          toast({
+            title: "جاري إضافة الموظف",
+            description: "يرجى الانتظار...",
+            duration: 3000,
+          });
+          
+          console.log('بيانات الإرسال:', userData); // للتحقق من البيانات
+          
+          // محاولة مباشرة باستخدام fetch
+          const response = await fetch('http://localhost:5000/api/users/add-employee', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(userData)
+          });
+
+          // التحقق من نجاح العملية
+          if (response.ok) {
+            const result = await response.json();
+            console.log('تم إنشاء الموظف بنجاح:', result);
+
+            // إضافة الموظف إلى القائمة المحلية
+            const newEmployee = {
+              id: Date.now(),
+              employeeId: generateEmployeeId(employees),
+              ...formData,
+              name: formData.name, 
+              completedTrips: 0,
+            };
+            setEmployees([newEmployee, ...employees]);
+
+            // عرض رسالة نجاح تتضمن معلومات تسجيل الدخول
+            toast({
+              title: "تم إضافة الموظف",
+              description: (
+                <div className="space-y-2">
+                  <p>تم إضافة الموظف الجديد بنجاح</p>
+                  <p className="font-semibold">يمكن للموظف تسجيل الدخول باستخدام:</p>
+                  <p>اسم المستخدم: <span className="font-bold">{formData.username}</span></p>
+                  <p>كلمة المرور: <span className="font-bold">{formData.password}</span></p>
+                </div>
+              ),
+              duration: 8000,
+            });
+          } else {
+            // عرض رسالة خطأ إذا فشلت العملية
+            let errorMessage = "حدث خطأ أثناء إضافة الموظف";
+            
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.message || errorMessage;
+            } catch (jsonError) {
+              console.error('خطأ في تحليل رسالة الخطأ:', jsonError);
+            }
+            
+            toast({
+              title: "فشل إضافة الموظف",
+              description: errorMessage,
+              variant: "destructive"
+            });
+          }
+        } catch (error) {
+          console.error('خطأ في الاتصال:', error);
+          toast({
+            title: "فشل إضافة الموظف",
+            description: "حدث خطأ أثناء الاتصال بالخادم - تأكد من تشغيل الخادم",
+            variant: "destructive",
+            duration: 5000
+          });
+        }
+      };
+
+      // تنفيذ العملية
+      createUserAndEmployee();
+      setIsDialogOpen(false);
+    }
+  };
+
+  const confirmUpdate = async () => {
+    try {
+      // إظهار رسالة للمستخدم بأن العملية جارية
+      toast({
+        title: "جاري تحديث البيانات",
+        description: "يرجى الانتظار...",
+        duration: 3000,
+      });
+      
+      // إعداد بيانات تحديث الموظف
+      const userData = {
+        currentUsername: currentEmployee.username, 
+        name: employeeToUpdate.name,
+        username: employeeToUpdate.username, 
+        password: employeeToUpdate.password, 
+        position: employeeToUpdate.position,
+        personalId: employeeToUpdate.personalId,
+        salary: employeeToUpdate.salary,
+        commission: employeeToUpdate.commission,
+        managedPhones: employeeToUpdate.managedPhones,
+        hireDate: employeeToUpdate.hireDate,
+        status: employeeToUpdate.status,
+        role: employeeToUpdate.role
+      };
+      
+      console.log('بيانات التحديث:', userData);
+      
+      // إرسال طلب تحديث بيانات الموظف إلى الخادم
+      const response = await fetch('http://localhost:5000/api/users/update-employee', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(userData)
+      });
+
+      if (response.ok) {
+        // تحديث القائمة المحلية
+        setEmployees(
+          employees.map((emp) =>
+            emp.id === employeeToUpdate.id ? employeeToUpdate : emp
+          )
+        );
+        
+        // إغلاق النوافذ الحوارية
+        setIsUpdateDialogOpen(false);
+        setIsDialogOpen(false);
+        
+        // إظهار رسالة نجاح
+        toast({
+          title: (
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="h-5 w-5" />
+              <span>تم تحديث الموظف</span>
+            </div>
+          ),
+          description: `تم تحديث بيانات الموظف ${employeeToUpdate.name} بنجاح وتحديث بيانات تسجيل الدخول`,
+          className: "bg-green-50 border-green-200 dark:bg-green-900 dark:border-green-800",
+          duration: 3000,
+        });
+      } else {
+        // في حالة فشل الطلب
+        const errorData = await response.json();
+        toast({
+          title: "فشل تحديث البيانات",
+          description: errorData.message || "حدث خطأ أثناء تحديث بيانات الموظف",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('خطأ في طلب التحديث:', error);
+      toast({
+        title: "فشل تحديث البيانات",
+        description: "حدث خطأ أثناء الاتصال بالخادم",
+        variant: "destructive"
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          إدارة الموظفين ({filteredEmployees.length})
+        </h1>
+        <div className="flex items-center space-x-4">
+          <PermissionButton 
+            section="employees" 
+            action="create" 
+            onClick={handleAdd} 
+            className="flex items-center gap-1"
+          >
+            <Plus className="h-4 w-4" />
+            <span>إضافة موظف</span>
+          </PermissionButton>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
+          <div className="relative flex-1">
+            <Search className="absolute right-3 top-2.5 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="بحث عن موظف..."
+              className="w-full pr-10 pl-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2 min-w-[100px] justify-center">
+            <button
+              onClick={() => setDisplayMode("list")}
+              className={`p-2 rounded-lg ${displayMode === "list" ? "bg-primary/10 text-primary" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+              title="عرض القائمة"
+            >
+              <List className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => setDisplayMode("thumbnails")}
+              className={`p-2 rounded-lg ${displayMode === "thumbnails" ? "bg-primary/10 text-primary" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+              title="عرض المصغرات"
+            >
+              <Grid className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="min-w-[180px]">
+            <select
+              className="w-full p-2 border rounded-lg"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">الكل</option>
+              <option value="active">نشط</option>
+              <option value="inactive">متوقف</option>
+            </select>
+          </div>
+        </div>
+
+        {displayMode === "list" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+            <thead>
+              <tr className="border-b dark:border-gray-700">
+                <th className="text-right py-3 px-4">الكود الوظيفي</th>
+                <th className="text-right py-3 px-4">الاسم</th>
+                <th className="text-right py-3 px-4">رقم الهاتف الشخصي</th>
+                <th className="text-right py-3 px-4">اسم المستخدم</th>
+                <th className="text-right py-3 px-4">الوظيفة</th>
+                <th className="text-right py-3 px-4">تاريخ التوظيف</th>
+                <th className="text-right py-3 px-4">تاريخ إيقاف التوظيف</th>
+                <th className="text-right py-3 px-4">الراتب الأساسي</th>
+                <th className="text-right py-3 px-4">نسبة العمولة</th>
+                <th className="text-right py-3 px-4">الرحلات المنفذة</th>
+                <th className="text-right py-3 px-4">الحالة</th>
+                <th className="text-right py-3 px-4">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredEmployees.map((employee) => (
+                <motion.tr
+                  key={employee.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                  onClick={() => handleRowClick(employee)}
+                >
+                  <td className="py-3 px-4">{employee.employeeId}</td>
+                  <td className="py-3 px-4">{employee.name}</td>
+                  <td className="py-3 px-4">{employee.personalId}</td>
+                  <td className="py-3 px-4">{employee.username}</td>
+                  <td className="py-3 px-4">{employee.position}</td>
+                  <td className="py-3 px-4">{employee.hireDate}</td>
+                  <td className="py-3 px-4">{employee.status === "inactive" ? employee.terminationDate : "-"}</td>
+                  <td className="py-3 px-4">{employee.salary} ج.م</td>
+                  <td className="py-3 px-4">{employee.commission}%</td>
+                  <td className="py-3 px-4">{employee.completedTrips}</td>
+                  <td className="py-3 px-4">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${employee.status === "active" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                      {employee.status === "active" ? "نشط" : "متوقف"}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEdit(employee)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDelete(employee)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filteredEmployees.map((employee) => (
+              <motion.div
+                key={employee.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => handleRowClick(employee)}
+              >
+                <div className="flex flex-col items-center">
+                  <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-3">
+                    <span className="text-xl font-bold text-primary">{employee.name?.substring(0, 2)}</span>
+                  </div>
+                  <h3 className="font-bold text-lg">{employee.name}</h3>
+                  <p className="text-sm text-gray-500 mb-1">{employee.position}</p>
+                  <p className="text-sm mb-1 flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${employee.status === "active" ? "bg-green-500" : "bg-red-500"}`}></span>
+                    {employee.status === "active" ? "نشط" : "متوقف"}
+                  </p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{employee.employeeId}</p>
+                </div>
+                <div className="flex justify-center mt-3 pt-3 border-t">
+                  <PermissionGuard section="employees" action="update">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEdit(employee);
+                      }}
+                      className="p-1 text-blue-600 hover:text-blue-800"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </button>
+                  </PermissionGuard>
+                  <PermissionGuard section="employees" action="delete">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(employee);
+                      }}
+                      className="p-1 text-red-600 hover:text-red-800"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </PermissionGuard>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>
+              {currentEmployee ? "تعديل موظف" : "إضافة موظف جديد"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="name">الاسم</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="personalId">رقم الهاتف الشخصي</Label>
+                <Input
+                  id="personalId"
+                  value={formData.personalId}
+                  onChange={(e) =>
+                    setFormData({ ...formData, personalId: e.target.value })
+                  }
+                  pattern="\d{11}"
+                  title="يجب أن يتكون من 11 رقم"
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="username">اسم المستخدم (بالإنجليزية فقط)</Label>
+                <Input
+                  id="username"
+                  value={formData.username}
+                  onChange={(e) =>
+                    setFormData({ ...formData, username: e.target.value })
+                  }
+                  pattern="[a-zA-Z0-9_]+"
+                  title="يجب أن يحتوي على حروف إنجليزية وأرقام فقط"
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="password">كلمة المرور</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) =>
+                      setFormData({ ...formData, password: e.target.value })
+                    }
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    onClick={() => setShowPassword(!showPassword)}
+                    title={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+                  >
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
+                        <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                        <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="position">الوظيفة</Label>
+                <select
+                  id="position"
+                  className="w-full p-2 border rounded-lg"
+                  value={formData.position}
+                  onChange={(e) =>
+                    setFormData({ ...formData, position: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">اختر الوظيفة</option>
+                  {positions.map((pos) => (
+                    <option key={pos} value={pos}>
+                      {pos}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="role">الدور (الصلاحيات)</Label>
+                <select
+                  id="role"
+                  className="w-full p-2 border rounded-lg"
+                  value={formData.role || "employee"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, role: e.target.value })
+                  }
+                  required
+                >
+                  {systemRoles.map(role => (
+                    <option key={role.id} value={role.id}>
+                      {role.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="salary">الراتب الأساسي</Label>
+                <Input
+                  id="salary"
+                  type="number"
+                  min="0"
+                  value={formData.salary}
+                  onChange={(e) =>
+                    setFormData({ ...formData, salary: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="commission">نسبة العمولة (%)</Label>
+                <Input
+                  id="commission"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={formData.commission}
+                  onChange={(e) =>
+                    setFormData({ ...formData, commission: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="managedPhones">أرقام الهواتف التي يديرها الموظف</Label>
+                <textarea
+                  id="managedPhones"
+                  className="w-full p-2 border rounded-lg min-h-[100px]"
+                  value={formData.managedPhones}
+                  onChange={(e) =>
+                    setFormData({ ...formData, managedPhones: e.target.value })
+                  }
+                  placeholder="أدخل كل رقم في سطر منفصل"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="hireDate">تاريخ التوظيف</Label>
+                <Input
+                  id="hireDate"
+                  type="date"
+                  value={formData.hireDate}
+                  max={new Date().toISOString().split("T")[0]}
+                  onChange={(e) =>
+                    setFormData({ ...formData, hireDate: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="identityDoc">مستند الهوية الشخصية</Label>
+                <Input
+                  id="identityDoc"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) =>
+                    setFormData({ ...formData, identityDoc: e.target.files[0] })
+                  }
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="cvDoc">السيرة الذاتية</Label>
+                <Input
+                  id="cvDoc"
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  onChange={(e) =>
+                    setFormData({ ...formData, cvDoc: e.target.files[0] })
+                  }
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="status">حالة الموظف</Label>
+                <select
+                  id="status"
+                  className="w-full p-2 border rounded-lg"
+                  value={formData.status}
+                  onChange={(e) => {
+                    const newStatus = e.target.value;
+                    if (formData.status === "active" && newStatus === "inactive") {
+                      // When changing from active to inactive:
+                      // 1. Clear managed phones
+                      // 2. Clear the termination date field
+                      setFormData({ 
+                        ...formData, 
+                        status: newStatus,
+                        managedPhones: "",
+                        terminationDate: ""
+                      });
+                    } else if (formData.status === "inactive" && newStatus === "active") {
+                      // When changing from inactive to active:
+                      // 1. Keep managed phones empty
+                      // 2. Remove termination date
+                      // 3. Clear hire date to force user to enter a new one
+                      setFormData({ 
+                        ...formData, 
+                        status: newStatus,
+                        hireDate: "",  // Clear hire date
+                        terminationDate: "",
+                        managedPhones: ""
+                      });
+                    } else {
+                      // Any other status change
+                      setFormData({ 
+                        ...formData, 
+                        status: newStatus,
+                        terminationDate: ""
+                      });
+                    }
+                  }}
+                  required
+                >
+                  <option value="active">نشط</option>
+                  <option value="inactive">متوقف</option>
+                </select>
+              </div>
+              
+              {formData.status === "inactive" && (
+                <div className="grid gap-2">
+                  <Label htmlFor="terminationDate">تاريخ إيقاف التوظيف</Label>
+                  <Input
+                    id="terminationDate"
+                    type="date"
+                    value={formData.terminationDate}
+                    onChange={(e) => setFormData({ ...formData, terminationDate: e.target.value })}
+                    max={new Date().toISOString().split("T")[0]}
+                    required
+                  />
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="submit">
+                {currentEmployee ? "تحديث" : "إضافة"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>حذف موظف</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف الموظف {employeeToDelete?.name}؟ لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+              حذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد تحديث الموظف</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من تحديث بيانات الموظف {employeeToUpdate?.name}؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmUpdate}>
+              تأكيد التحديث
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <EmployeeDetailsDialog
+        employee={selectedEmployee}
+        open={isDetailsDialogOpen}
+        onOpenChange={setIsDetailsDialogOpen}
+      />
+    </div>
+  );
+}
+
+export default Employees;

@@ -1,0 +1,1043 @@
+import React, { useState, useEffect } from "react";
+import { Plus, Trash2, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/components/ui/use-toast";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { TripTable } from "./TripTable";
+import { TripForm } from "./TripForm";
+import { TripDetailsDialog } from "./TripDetailsDialog";
+import { DeleteTripDialog } from "./DeleteTripDialog";
+import { SettlementDialog } from "./SettlementDialog";
+import { TripFilters } from "./TripFilters";
+import { generateTripNumber, filterTripsByDate, sortTrips, tripTypes } from "../utils";
+
+// Lista de tipos de vehículos (misma que en la página de proveedores y formulario de viajes)
+const vehicleTypes = [
+  { id: "h1", name: "H1" },
+  { id: "hiace", name: "هايس" },
+  { id: "coaster", name: "كوستر" },
+  { id: "bus28", name: "باص 28" },
+  { id: "bus33", name: "باص 33" },
+  { id: "mcv500", name: "مرسيدس MCV500" },
+  { id: "mcv600", name: "مرسيدس MCV600" },
+  { id: "wedding", name: "زفة" },
+  { id: "elantra", name: "النترا" },
+  { id: "tucson", name: "توسان" },
+  { id: "sportage", name: "سبورتاج" },
+  { id: "mg", name: "ام جي" },
+];
+
+function TripsView({ title, trips: initialTrips, emptyMessage, filterStatus }) {
+  // Usar localStorage para todos los viajes (para operaciones de guardado)
+  const [allTrips, setAllTrips] = useLocalStorage("trips", []);
+  const [suppliers] = useLocalStorage("suppliers", []);
+  const [employees] = useLocalStorage("employees", []);
+  
+  // Estado local para los viajes que se muestran en esta vista
+  const [displayTrips, setDisplayTrips] = useState([]);
+  
+  // Actualizar los viajes mostrados cuando cambien los initialTrips o el filtro
+  useEffect(() => {
+    // Si se proporciona un filterStatus específico, respetarlo
+    if (filterStatus) {
+      // Usar los viajes filtrados que se pasan como prop
+      setDisplayTrips(initialTrips || []);
+    } else {
+      // Si no hay filtro específico (página principal de viajes), usar todos los viajes
+      setDisplayTrips(allTrips);
+    }
+  }, [initialTrips, filterStatus, allTrips]);
+  
+  // استخراج بيانات المستخدم الحالي من localStorage
+  const [userData, setUserData] = useState(null);
+  
+  // Cargar datos del usuario al inicio
+  React.useEffect(() => {
+    try {
+      const storedUserData = localStorage.getItem('userData');
+      if (storedUserData) {
+        setUserData(JSON.parse(storedUserData));
+      }
+    } catch (error) {
+      console.error('خطأ في قراءة بيانات المستخدم:', error);
+    }
+  }, []);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [dateFilter, setDateFilter] = React.useState("currentMonth");
+  const [customDate, setCustomDate] = React.useState("");
+  const [startDate, setStartDate] = React.useState("");
+  const [endDate, setEndDate] = React.useState("");
+  const [selectedSupplier, setSelectedSupplier] = React.useState("all");
+  const [selectedEmployee, setSelectedEmployee] = React.useState("all");
+  const [settlementStatus, setSettlementStatus] = React.useState("all");
+  const [sortField, setSortField] = React.useState("date");
+  const [sortDirection, setSortDirection] = React.useState("desc");
+  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = React.useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+  const [isSettlementDialogOpen, setIsSettlementDialogOpen] = React.useState(false);
+  const [currentTrip, setCurrentTrip] = React.useState(null);
+  const [selectedTrip, setSelectedTrip] = React.useState(null);
+  const [tripToDelete, setTripToDelete] = React.useState(null);
+  const [tripToSettle, setTripToSettle] = React.useState(null);
+  const [selectedSupplierVehicles, setSelectedSupplierVehicles] = React.useState([]);
+  const [selectedTrips, setSelectedTrips] = React.useState([]);
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = React.useState(false);
+  const [isBulkSettlementDialogOpen, setIsBulkSettlementDialogOpen] = React.useState(false);
+  const [bulkSettlementAction, setBulkSettlementAction] = React.useState(null); // 'settled' or 'unsettled'
+  const [isBulkStatusDialogOpen, setIsBulkStatusDialogOpen] = React.useState(false);
+  const [isStatusChangeDialogOpen, setIsStatusChangeDialogOpen] = React.useState(false);
+  const [tripStatusData, setTripStatusData] = React.useState(null);
+  const { toast } = useToast();
+
+  const [formData, setFormData] = React.useState({
+    tripNumber: "",
+    type: "",
+    date: "",
+    customerName: "",
+    customerPhone: "",
+    route: "",
+    commercialPrice: "",
+    tripPrice: "",
+    paidAmount: "",
+    collection: "",
+    commission: "",
+    supplier: "",
+    vehicleType: "",
+    driverName: "",
+    driverPhone: "",
+    paymentProof: "",
+    quantity: 1,
+    baseCommercialPrice: "",
+    baseTripPrice: "",
+    isSettled: false
+  });
+
+  const filteredTrips = React.useMemo(() => {
+    // Filtrar las rutas según el rol del usuario
+    let filtered = trips; // Usar trips en lugar de initialTrips
+    
+    // Si el usuario tiene rol "موظف" (empleado), solo mostrar sus propias rutas
+    if (userData?.role === "employee") {
+      filtered = filtered.filter(trip => trip.employee === userData.name);
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter((trip) =>
+        trip.tripNumber?.toString().includes(searchTerm) ||
+        trip.route?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trip.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trip.customerPhone?.includes(searchTerm)
+      );
+    }
+
+    filtered = filterTripsByDate(filtered, dateFilter, customDate, startDate, endDate);
+
+    if (selectedSupplier !== "all") {
+      filtered = filtered.filter(trip => trip.supplier === selectedSupplier);
+    }
+    
+    // Filter by employee
+    if (selectedEmployee !== "all") {
+      filtered = filtered.filter(trip => trip.employee === selectedEmployee);
+    }
+
+    // Filter by settlement status
+    if (settlementStatus !== "all") {
+      if (settlementStatus === "settled") {
+        filtered = filtered.filter(trip => trip.isSettled === true);
+      } else if (settlementStatus === "unsettled") {
+        filtered = filtered.filter(trip => trip.isSettled === false);
+      }
+    }
+
+    return sortTrips(filtered, sortField, sortDirection);
+  }, [trips, userData, searchTerm, dateFilter, customDate, startDate, endDate, selectedSupplier, selectedEmployee, settlementStatus, sortField, sortDirection]);
+
+  const handleViewDetails = (trip) => {
+    setSelectedTrip(trip);
+    setIsDetailsDialogOpen(true);
+  };
+
+  const handleEdit = (trip) => {
+    setCurrentTrip(trip);
+    setFormData({
+      ...trip
+    });
+    const selectedSupplier = suppliers.find(s => s.id.toString() === trip.supplier);
+    const vehicleTypes = selectedSupplier?.vehicles || [];
+    setSelectedSupplierVehicles(vehicleTypes.map(vehicleId => ({
+      id: vehicleId,
+      type: vehicleId
+    })));
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = (trip) => {
+    setTripToDelete(trip);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleSettlement = (trip, skipDialog = false) => {
+    if (skipDialog) {
+      // If the trip is cancelled, don't allow unsettling it
+      if (trip.status === "cancelled" && !trip.isSettled) {
+        toast({
+          title: "لا يمكن إلغاء تسوية الرحلات الملغاة",
+          description: "الرحلات الملغاة يجب أن تكون مسواة دائمًا",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Apply the settlement change directly
+      const updatedTrips = trips.map(t => 
+        t.id === trip.id ? { ...t, isSettled: trip.isSettled } : t
+      );
+      setTrips(updatedTrips);
+      toast({
+        title: trip.isSettled ? "تم تسوية الرحلة بنجاح" : "تم إلغاء تسوية الرحلة",
+      });
+    } else {
+      setTripToSettle(trip);
+      setIsSettlementDialogOpen(true);
+    }
+  };
+
+  // Función para verificar si la fecha del viaje es hoy o futura
+  const isTripTodayOrFuture = (tripDate) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Resetear a 00:00:00 para comparar solo fechas
+    
+    const tripDateObj = new Date(tripDate);
+    tripDateObj.setHours(0, 0, 0, 0);
+    
+    return tripDateObj >= today;
+  };
+
+  // Función para actualizar automáticamente los estados basados en fechas
+  const updateTripStatusesBasedOnDate = () => {
+    const updatedTrips = trips.map(trip => {
+      // No cambiar viajes cancelados
+      if (trip.status === "cancelled") return trip;
+      
+      const isInFuture = isTripTodayOrFuture(trip.date);
+      // Si el viaje es hoy o futuro → estado activo
+      // Si el viaje es pasado → estado completado
+      const newStatus = isInFuture ? "active" : "completed";
+      
+      // Solo actualizar si el estado actual es diferente
+      if (trip.status !== newStatus) {
+        return { ...trip, status: newStatus };
+      }
+      return trip;
+    });
+    
+    // Actualizar solo si hay cambios
+    if (JSON.stringify(updatedTrips) !== JSON.stringify(trips)) {
+      setTrips(updatedTrips);
+    }
+  };
+  
+  // Efecto para actualizar estados al cargar o cuando cambian las fechas
+  React.useEffect(() => {
+    updateTripStatusesBasedOnDate();
+    // Implementar actualización periódica (cada día a las 00:00)
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      // Verificar si es medianoche (00:00)
+      if (now.getHours() === 0 && now.getMinutes() === 0) {
+        updateTripStatusesBasedOnDate();
+      }
+    }, 60000); // Verificar cada minuto
+    
+    return () => clearInterval(intervalId);
+  }, [trips.length]); // Ejecutar cuando cambia el número de viajes
+
+  const handleStatusChange = (trip, newStatus) => {
+    // Confirmación para cancelar viaje
+    if (newStatus === "cancelled") {
+      setTripStatusData({ trip, newStatus });
+      setIsStatusChangeDialogOpen(true);
+      return;
+    }
+    
+    // Verificar restricciones basadas en fecha
+    const isFutureTrip = isTripTodayOrFuture(trip.date);
+    
+    // Caso 1: Viaje futuro intentando marcarse como completado
+    if (isFutureTrip && newStatus === "completed") {
+      toast({
+        title: "خطأ في تغيير الحالة",
+        description: "لا يمكن تغيير حالة الرحلة إلى 'مكتملة' قبل موعد الرحلة. يمكنك فقط تغييرها إلى 'ملغاة'.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Caso 2: Viaje pasado intentando marcarse como activo
+    if (!isFutureTrip && newStatus === "active") {
+      toast({
+        title: "خطأ في تغيير الحالة",
+        description: "لا يمكن تغيير حالة الرحلة إلى 'قيد التنفيذ' بعد مرور تاريخ الرحلة. يمكنك فقط تغييرها إلى 'ملغاة'.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Cambio permitido, aplicar
+    const updatedTrips = trips.map(t => 
+      t.id === trip.id ? { ...t, status: newStatus } : t
+    );
+    setTrips(updatedTrips);
+    toast({
+      title: "تم تغيير حالة الرحلة",
+    });
+  };
+
+  const handleCopyBooking = (trip) => {
+    // Get trip type name
+    const tripTypeName = tripTypes.find(t => t.id === trip.type)?.name || trip.type;
+    
+    // Get vehicle type name
+    const vehicleTypeName = vehicleTypes.find(v => v.id === trip.vehicleType)?.name || trip.vehicleType;
+    
+    // Calculate due amount (collection amount)
+    const tripPrice = parseFloat(trip.tripPrice) || 0;
+    const paidAmount = parseFloat(trip.paidAmount) || 0;
+    const collection = parseFloat(trip.collection) || 0;
+    
+    // Create booking message in the format specified by the user
+    let message = `*تم تأكيد حجز رقم ${trip.tripNumber}*\n`;
+    message += `> *بيانات التواصل*\n`;
+    message += `* *الأسم:* أ/${trip.customerName}\n`;
+    message += `* *الهاتف:* ${trip.customerPhone}\n`;
+    message += `* *واتساب:* ${trip.customerWhatsapp || trip.customerPhone}\n\n`;
+    
+    message += `> *تفاصيل الحجز:*\n`;
+    message += `* *التاريخ:* ${trip.date}\n`;
+    message += `* *البيان:* ${tripTypeName}\n`;
+    message += `* *نوع السيارة:* ${vehicleTypeName}\n`;
+    message += `* *الكمية:* ${trip.quantity || '1'}\n`;
+    message += `* *التحرك* :\n1. الساعة ${trip.route}\n`;
+    message += `*دفع مع السائق: ${collection}ج.م*\n\n`;
+    
+    message += `> *المدفوعات:*\n`;
+    message += `* *الإجمالي:* ${tripPrice}ج.م\n`;
+    message += `* *مدفوع:* ${paidAmount}ج.م\n`;
+    message += `*المبلغ المستحق: ${collection}ج.م*`;
+    
+    // Copy to clipboard
+    navigator.clipboard.writeText(message);
+    toast({
+      title: "تم نسخ الرسالة بنجاح",
+      description: "تم نسخ رسالة الحجز للواتساب بنجاح",
+    });
+  };
+
+  const handleCopyDriver = (trip) => {
+    // Create driver details message in the format specified by the user
+    let message = `*بيانات السائق*\n`;
+    message += `الأسم: ${trip.driverName || 'غير محدد'}\n`;
+    message += `الهاتف: ${trip.driverPhone || 'غير محدد'}`;
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(message);
+    toast({
+      title: "تم نسخ البيانات بنجاح",
+      description: "تم نسخ بيانات السائق بنجاح",
+    });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    // Validar campos requeridos
+    const requiredFields = ['customerName', 'customerPhone', 'date', 'type', 'supplier', 'vehicleType', 'tripPrice'];
+    const missingFields = requiredFields.filter(field => !formData[field] || formData[field].toString().trim() === '');
+    
+    if (missingFields.length > 0) {
+      toast({
+        title: "حقول مطلوبة",
+        description: "يرجى ملء جميع الحقول المطلوبة",
+        variant: "destructive",
+        duration: 3000
+      });
+      return;
+    }
+    
+    // Determinar automáticamente el estado basado en la fecha
+    const determineStatus = (date) => {
+      // Si es cancelado, mantener cancelado
+      if (formData.status === "cancelled") return "cancelled";
+      
+      // De lo contrario, determinar basado en la fecha
+      const isInFuture = isTripTodayOrFuture(date);
+      return isInFuture ? "active" : "completed";
+    };
+    
+    try {
+      // Si estamos editando un viaje existente
+      if (currentTrip) {
+        // Crear una copia actualizada del viaje
+        const updatedTrip = {
+          ...currentTrip,
+          ...formData,
+          // Asegurarse de que los valores numéricos sean números
+          tripPrice: parseFloat(formData.tripPrice),
+          supplierPrice: parseFloat(formData.supplierPrice || 0),
+          driverPrice: parseFloat(formData.driverPrice || 0),
+          profit: parseFloat(formData.profit || 0),
+          // Mantener el ID y otros campos importantes
+          id: currentTrip.id,
+          tripNumber: currentTrip.tripNumber,
+          createdAt: currentTrip.createdAt,
+          updatedAt: new Date().toISOString()
+        };
+        
+        // Actualizar el viaje en el array
+        const updatedAllTrips = allTrips.map(trip => 
+          trip.id === currentTrip.id ? updatedTrip : trip
+        );
+        
+        // Actualizar los viajes mostrados
+        const updatedDisplayTrips = displayTrips.map(trip => 
+          trip.id === currentTrip.id ? updatedTrip : trip
+        );
+        
+        // Manejar el problema de límite de almacenamiento
+        try {
+          // Intentar guardar
+          window.localStorage.setItem('trips', JSON.stringify(updatedAllTrips));
+          
+          // Actualizar el estado si se guardó correctamente
+          setAllTrips(updatedAllTrips);
+          setDisplayTrips(updatedDisplayTrips);
+          
+          toast({
+            title: "تم تحديث الرحلة بنجاح",
+            duration: 3000
+          });
+        } catch (storageError) {
+          console.warn('Storage limit reached during update, trying alternative approaches');
+          
+          try {
+            // Encontrar y eliminar el viaje antiguo antes de añadir la actualización
+            const otherTrips = allTrips.filter(trip => trip.id !== currentTrip.id);
+            const pruned = [...otherTrips, updatedTrip];
+            
+            // Guardar la versión reducida
+            window.localStorage.setItem('trips', JSON.stringify(pruned));
+            setAllTrips(pruned);
+            
+            // Actualizar los viajes mostrados
+            const updatedDisplayTrips = displayTrips.map(trip => 
+              trip.id === currentTrip.id ? updatedTrip : trip
+            );
+            setDisplayTrips(updatedDisplayTrips);
+            
+            toast({
+              title: "تم تحديث الرحلة بنجاح",
+              duration: 3000
+            });
+          } catch (finalError) {
+            throw new Error('Cannot save trip update due to browser storage limitations');
+          }
+        }
+      } else {
+        // Para viaje nuevo, determinar estado automáticamente
+        const status = determineStatus(formData.date);
+        
+        // Crear un nuevo viaje con todos los datos necesarios
+        const newTrip = {
+          ...formData,
+          id: Date.now(),
+          tripNumber: generateTripNumber(),
+          isSettled: status === "cancelled", // Si es cancelado, marcar como liquidado
+          status, // Establecer el estado basado en la fecha
+          employee: userData?.name || "" // حفظ اسم الموظف الذي أنشأ الرحلة
+        };
+        
+        // Obtener la lista actual directamente de localStorage para mayor seguridad
+        let currentTrips = [];
+        try {
+          const storedTrips = window.localStorage.getItem('trips');
+          currentTrips = storedTrips ? JSON.parse(storedTrips) : [];
+        } catch (e) {
+          console.error('Error al leer viajes existentes:', e);
+          currentTrips = [...allTrips]; // Usar el estado actual como respaldo
+        }
+        
+        // Añadir el nuevo viaje a la lista existente
+        let updatedTrips = [...currentTrips, newTrip];
+        
+        // Manejar el problema de límite de almacenamiento
+        try {
+          // Intentar guardar
+          window.localStorage.setItem('trips', JSON.stringify(updatedTrips));
+          setAllTrips(updatedTrips);
+          
+          // Si estamos en la vista correcta, actualizar los viajes mostrados
+          if (!filterStatus || filterStatus === status) {
+            setDisplayTrips([...displayTrips, newTrip]);
+          }
+          
+          toast({
+            title: "تم إضافة الرحلة بنجاح",
+            duration: 3000
+          });
+          
+        } catch (storageError) {
+          console.warn('Storage limit reached, pruning older trips to make space');
+          
+          // Si hay error de espacio, eliminar las entradas más antiguas para hacer espacio
+          if (updatedTrips.length > 30) {
+            // Ordenar por fecha (más antiguos primero)
+            updatedTrips.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Conservar solo los 25 viajes más recientes
+            updatedTrips = [...updatedTrips.slice(updatedTrips.length - 25), newTrip];
+            
+            try {
+              // Intentar guardar la versión reducida
+              window.localStorage.setItem('trips', JSON.stringify(updatedTrips));
+              setAllTrips(updatedTrips);
+              
+              // Si estamos en la vista correcta, actualizar los viajes mostrados
+              if (!filterStatus || filterStatus === status) {
+                setDisplayTrips([...displayTrips, newTrip]);
+              }
+              
+              toast({
+                title: "تم إضافة الرحلة بنجاح",
+                duration: 3000
+              });
+            } catch (finalError) {
+              throw new Error('Cannot save trip update due to browser storage limitations');
+            }
+          }
+        }
+      }
+      
+      // Cerrar el diálogo y limpiar el formulario
+      setIsDialogOpen(false);
+      setCurrentTrip(null);
+      setFormData({
+        tripNumber: "",
+        type: "",
+        date: "",
+        customerName: "",
+        customerPhone: "",
+        status: "",
+        notes: "",
+        tripPrice: "",
+        supplierPrice: "",
+        driverPrice: "",
+        profit: "",
+        paidAmount: "",
+        remainingAmount: "",
+        collection: "",
+        commission: "",
+        supplier: "",
+        vehicleType: "",
+        driverName: "",
+        driverPhone: "",
+        paymentProof: "",
+        quantity: 1,
+        baseCommercialPrice: "",
+        baseTripPrice: "",
+        isSettled: false
+      });
+    } catch (error) {
+      console.error('Error al procesar el formulario:', error);
+      toast({
+            try {
+              window.localStorage.setItem('trips', JSON.stringify([newTrip]));
+              updatedTrips = [newTrip];
+            } catch (lastError) {
+              // Si aún falla, manejamos el error
+              throw new Error('Cannot save trip due to browser storage limitations');
+            }
+          }
+        }
+        
+        // Actualizar el estado
+        setTrips(updatedTrips);
+        
+        toast({
+          title: "تم إضافة الرحلة بنجاح",
+          duration: 3000
+        });
+      }
+      
+      // Cerrar el diálogo y limpiar el formulario
+      setIsDialogOpen(false);
+      setCurrentTrip(null);
+      setFormData({
+        tripNumber: "",
+        type: "",
+        date: "",
+        customerName: "",
+        customerPhone: "",
+        route: "",
+        commercialPrice: "",
+        tripPrice: "",
+        paidAmount: "",
+        collection: "",
+        commission: "",
+        supplier: "",
+        vehicleType: "",
+        driverName: "",
+        driverPhone: "",
+        paymentProof: "",
+        quantity: 1,
+        baseCommercialPrice: "",
+        baseTripPrice: "",
+        isSettled: false
+      });
+      
+    } catch (error) {
+      console.error('Error al guardar los viajes:', error);
+      toast({
+        title: "حدث خطأ أثناء حفظ الرحلة",
+        description: "يرجى المحاولة مرة أخرى",
+        variant: "destructive",
+        duration: 3000
+      });
+    }
+    setIsDialogOpen(false);
+    setCurrentTrip(null);
+    setFormData({
+      tripNumber: "",
+      type: "",
+      date: "",
+      customerName: "",
+      customerPhone: "",
+      route: "",
+      commercialPrice: "",
+      tripPrice: "",
+      paidAmount: "",
+      collection: "",
+      commission: "",
+      supplier: "",
+      vehicleType: "",
+      driverName: "",
+      driverPhone: "",
+      paymentProof: "",
+      quantity: 1,
+      baseCommercialPrice: "",
+      baseTripPrice: "",
+      isSettled: false
+    });
+  };
+
+  const handleDeleteConfirm = () => {
+    if (tripToDelete) {
+      const updatedTrips = trips.filter(trip => trip.id !== tripToDelete.id);
+      setTrips(updatedTrips);
+      setTripToDelete(null);
+      setIsDeleteDialogOpen(false);
+      toast({
+        title: "تم حذف الرحلة بنجاح",
+      });
+    }
+  };
+
+  const handleSettlementConfirm = () => {
+    if (tripToSettle) {
+      // Don't allow changing settlement status to false if trip is cancelled
+      if (tripToSettle.status === "cancelled" && tripToSettle.isSettled) {
+        toast({
+          title: "لا يمكن إلغاء تسوية الرحلات الملغاة",
+          description: "الرحلات الملغاة يجب أن تكون مسواة دائمًا",
+          variant: "destructive"
+        });
+        setTripToSettle(null);
+        setIsSettlementDialogOpen(false);
+        return;
+      }
+      
+      const updatedTrips = trips.map(trip => 
+        trip.id === tripToSettle.id ? { ...trip, isSettled: !trip.isSettled } : trip
+      );
+      setTrips(updatedTrips);
+      setTripToSettle(null);
+      setIsSettlementDialogOpen(false);
+      toast({
+        title: tripToSettle.isSettled ? "تم إلغاء تسوية الرحلة" : "تم تسوية الرحلة بنجاح",
+      });
+    }
+  };
+
+  // Handle bulk selection for checkboxes
+  const handleSelectAllTrips = (checked) => {
+    if (checked) {
+      setSelectedTrips(filteredTrips.map(trip => trip.id));
+    } else {
+      setSelectedTrips([]);
+    }
+  };
+
+  const handleSelectTrip = (tripId, checked, e) => {
+    e.stopPropagation(); // Prevent row click event
+    
+    if (checked) {
+      setSelectedTrips(prev => [...prev, tripId]);
+    } else {
+      setSelectedTrips(prev => prev.filter(id => id !== tripId));
+    }
+  };
+
+  // Bulk actions handlers
+  const handleBulkDelete = () => {
+    setIsBulkDeleteDialogOpen(true);
+  };
+
+  const confirmBulkDelete = () => {
+    const updatedTrips = trips.filter(trip => !selectedTrips.includes(trip.id));
+    setTrips(updatedTrips);
+    setSelectedTrips([]);
+    setIsBulkDeleteDialogOpen(false);
+    toast({
+      title: "تم حذف الرحلات المحددة",
+      description: `تم حذف ${selectedTrips.length} رحلة بنجاح`,
+    });
+  };
+
+  const handleBulkSettlement = (action) => {
+    setBulkSettlementAction(action);
+    setIsBulkSettlementDialogOpen(true);
+  };
+
+  const confirmBulkSettlement = () => {
+    const isSettled = bulkSettlementAction === 'settled';
+    
+    // If trying to unsettled trips, check if any are cancelled and can't be unsettled
+    if (!isSettled) {
+      const cancelledTrips = trips.filter(trip => 
+        selectedTrips.includes(trip.id) && trip.status === "cancelled"
+      );
+      
+      if (cancelledTrips.length > 0) {
+        toast({
+          title: "لا يمكن إلغاء تسوية الرحلات الملغاة",
+          description: `${cancelledTrips.length} من الرحلات المحددة هي رحلات ملغاة ولا يمكن إلغاء تسويتها`,
+          variant: "destructive"
+        });
+        
+        // Just proceed with the non-cancelled trips
+        const updatedTrips = trips.map(trip => 
+          selectedTrips.includes(trip.id) && trip.status !== "cancelled" ? { ...trip, isSettled } : trip
+        );
+        
+        setTrips(updatedTrips);
+        setSelectedTrips([]);
+        setIsBulkSettlementDialogOpen(false);
+        return;
+      }
+    }
+    
+    // Normal flow
+    const updatedTrips = trips.map(trip => 
+      selectedTrips.includes(trip.id) ? { ...trip, isSettled } : trip
+    );
+    
+    setTrips(updatedTrips);
+    setSelectedTrips([]);
+    setIsBulkSettlementDialogOpen(false);
+    toast({
+      title: isSettled ? "تم تسوية الرحلات المحددة" : "تم إلغاء تسوية الرحلات المحددة",
+      description: `تم تعديل حالة ${selectedTrips.length} رحلة بنجاح`,
+    });
+  };
+
+  const handleBulkStatusChange = () => {
+    setIsBulkStatusDialogOpen(true);
+  };
+
+  const confirmBulkStatusChange = () => {
+    const updatedTrips = trips.map(trip => 
+      selectedTrips.includes(trip.id) ? { ...trip, status: "cancelled", isSettled: true } : trip
+    );
+    
+    setTrips(updatedTrips);
+    setSelectedTrips([]);
+    setIsBulkStatusDialogOpen(false);
+    toast({
+      title: "تم تغيير حالة الرحلات المحددة",
+      description: `تم تعديل حالة ${selectedTrips.length} رحلة إلى 'ملغاة' بنجاح وتعيينها كمسواة تلقائيًا`,
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          {title} ({filteredTrips.length})
+        </h1>
+        <Button 
+          className="flex items-center gap-2 w-full sm:w-auto" 
+          onClick={() => {
+            setCurrentTrip(null);
+            setFormData({
+              tripNumber: "",
+              type: "",
+              date: "",
+              customerName: "",
+              customerPhone: "",
+              route: "",
+              commercialPrice: "",
+              tripPrice: "",
+              paidAmount: "",
+              collection: "",
+              commission: "",
+              supplier: "",
+              vehicleType: "",
+              driverName: "",
+              driverPhone: "",
+              paymentProof: "",
+              quantity: 1,
+              baseCommercialPrice: "",
+              baseTripPrice: "",
+              isSettled: false
+            });
+            setIsDialogOpen(true);
+          }}
+        >
+          <Plus className="h-5 w-5" />
+          إضافة رحلة جديدة
+        </Button>
+      </div>
+
+      <TripFilters
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        dateFilter={dateFilter}
+        onDateFilterChange={setDateFilter}
+        customDate={customDate}
+        onCustomDateChange={setCustomDate}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+        endDate={endDate}
+        onEndDateChange={setEndDate}
+        selectedSupplier={selectedSupplier}
+        onSupplierFilterChange={setSelectedSupplier}
+        suppliers={suppliers}
+        selectedEmployee={selectedEmployee}
+        onEmployeeFilterChange={setSelectedEmployee}
+        employees={employees}
+        settlementStatus={settlementStatus}
+        onSettlementStatusChange={setSettlementStatus}
+        sortField={sortField}
+        sortDirection={sortDirection}
+        onSortChange={(field, direction) => {
+          setSortField(field);
+          setSortDirection(direction);
+        }}
+      />
+
+      {filteredTrips.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500 dark:text-gray-400">{emptyMessage}</p>
+        </div>
+      ) : (
+        <>
+          {/* Bulk Actions Bar */}
+          {selectedTrips.length > 0 && (
+            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-blue-700 dark:text-blue-400 font-medium">
+                  تم تحديد {selectedTrips.length} رحلة
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedTrips([])}>
+                  إلغاء التحديد
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1"
+                  onClick={() => handleBulkSettlement('settled')}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  تسوية
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1"
+                  onClick={() => handleBulkSettlement('unsettled')}
+                >
+                  <XCircle className="h-4 w-4" />
+                  إلغاء التسوية
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1"
+                  onClick={handleBulkStatusChange}
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  تغيير إلى ملغاة
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="flex items-center gap-1"
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  حذف
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <TripTable
+            filteredTrips={filteredTrips}
+            suppliers={suppliers}
+            selectedTrips={selectedTrips}
+            onSelectTrip={handleSelectTrip}
+            onSelectAll={handleSelectAllTrips}
+            onViewDetails={handleViewDetails}
+            onEdit={handleEdit}
+            onCopyBooking={handleCopyBooking}
+            onCopyDriver={handleCopyDriver}
+            onSettlement={handleSettlement}
+            onStatusChange={handleStatusChange}
+            onDelete={handleDelete}
+          />
+        </>
+      )}
+
+      <TripForm
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+        formData={formData}
+        setFormData={setFormData}
+        currentTrip={currentTrip}
+        suppliers={suppliers}
+        selectedSupplierVehicles={selectedSupplierVehicles}
+        setSelectedSupplierVehicles={setSelectedSupplierVehicles}
+        onSubmit={handleSubmit}
+      />
+
+      <TripDetailsDialog
+        open={isDetailsDialogOpen}
+        onOpenChange={setIsDetailsDialogOpen}
+        selectedTrip={selectedTrip}
+        suppliers={suppliers}
+      />
+
+      <DeleteTripDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        onConfirm={handleDeleteConfirm}
+      />
+
+      <SettlementDialog
+        open={isSettlementDialogOpen}
+        onOpenChange={setIsSettlementDialogOpen}
+        tripToSettle={tripToSettle}
+        onConfirm={handleSettlementConfirm}
+      />
+      
+      {/* Status Change Dialog - especially for cancellation confirmation */}
+      <AlertDialog open={isStatusChangeDialogOpen} onOpenChange={setIsStatusChangeDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد تغيير حالة الرحلة</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من تغيير حالة الرحلة إلى 'ملغاة'؟
+              <br />
+              <span className="font-bold">ملاحظة:</span> سيتم تعيين حالة التسوية إلى 'نعم' تلقائيًا للرحلات الملغاة.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              const updatedTrips = trips.map(t => 
+                t.id === tripStatusData.trip.id ? { ...t, status: "cancelled", isSettled: true } : t
+              );
+              setTrips(updatedTrips);
+              setIsStatusChangeDialogOpen(false);
+              toast({
+                title: "تم تغيير حالة الرحلة إلى ملغاة",
+                description: "تم تعيين حالة التسوية إلى 'نعم' تلقائيًا"
+              });
+            }} className="bg-red-600 hover:bg-red-700">
+              تأكيد
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Dialog */}
+      <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد حذف متعدد</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف {selectedTrips.length} رحلة؟ لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkDelete} className="bg-red-600 hover:bg-red-700">
+              حذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Settlement Dialog */}
+      <AlertDialog open={isBulkSettlementDialogOpen} onOpenChange={setIsBulkSettlementDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد تغيير حالة التسوية</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من {bulkSettlementAction === 'settled' ? 'تسوية' : 'إلغاء تسوية'} {selectedTrips.length} رحلة؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkSettlement}>
+              تأكيد
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Status Change Dialog */}
+      <AlertDialog open={isBulkStatusDialogOpen} onOpenChange={setIsBulkStatusDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد تغيير حالة الرحلات</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من تغيير حالة {selectedTrips.length} رحلة إلى 'ملغاة'؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkStatusChange} className="bg-yellow-600 hover:bg-yellow-700">
+              تأكيد
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+export default TripsView;

@@ -1,0 +1,1006 @@
+import React, { useState, useEffect } from "react";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { useToast } from "@/components/ui/use-toast";
+import { useNotifications } from "@/context/NotificationsContext";
+import { 
+  AlertCircle, 
+  Clock, 
+  DollarSign, 
+  UserX, 
+  AlertTriangle, 
+  ShieldAlert,
+  FileQuestion,
+  TrendingDown,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Calendar as CalendarIcon,
+  Edit,
+  Trash2
+} from "lucide-react";
+
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+
+const formatDate = (dateString) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+const formatYearMonth = (date) => {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const deductionTypes = [
+  { id: "absence", label: "غياب", icon: UserX, color: "red" },
+  { id: "penalty", label: "جزاء", icon: AlertTriangle, color: "amber" },
+  { id: "late", label: "تأخير", icon: Clock, color: "orange" },
+  { id: "misconduct", label: "سوء سلوك", icon: ShieldAlert, color: "purple" },
+  { id: "partial", label: "حضور جزئي", icon: Clock, color: "blue" },
+  { id: "other", label: "أخرى", icon: FileQuestion, color: "gray" }
+];
+
+export default function Deductions() {
+  const [userData, setUserData] = useState(null);
+  const [employees, setEmployees] = useLocalStorage("employees", []);
+  const [deductions, setDeductions] = useLocalStorage("deductions", []);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [deductionType, setDeductionType] = useState("");
+  const [deductionAmount, setDeductionAmount] = useState("");
+  const [deductionReason, setDeductionReason] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [currentDeduction, setCurrentDeduction] = useState(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deductionToDelete, setDeductionToDelete] = useState(null);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const { toast } = useToast();
+  const { addNotification } = useNotifications();
+  
+  // Format date as yyyy-MM-dd
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Format date for display
+  const formatDateForDisplay = (date, format = 'yyyy-MM-dd') => {
+    if (!date) return '';
+    
+    // Simple implementation for common formats
+    if (format === 'yyyy-MM-dd') {
+      return formatDate(date);
+    } else if (format === 'MMMM yyyy') {
+      const months = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+      return `${months[date.getMonth()]} ${date.getFullYear()}`;
+    } else if (format === 'EEEE') {
+      const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      return days[date.getDay()];
+    } else if (format === 'EEEE, d MMMM yyyy') {
+      const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const months = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+      return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    }
+    
+    return formatDate(date);
+  };
+  
+  // Check if date is in the current month
+  const isCurrentMonth = (date) => {
+    const today = new Date();
+    return date.getMonth() === today.getMonth() && 
+           date.getFullYear() === today.getFullYear();
+  };
+  
+  // Check if a date is at or beyond the 3-month limit
+  const isThreeMonthsAgo = (date) => {
+    const today = new Date();
+    const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, 1); // First day of month 3 months ago
+    return date <= threeMonthsAgo;
+  };
+  
+  // Navigate to previous month with 3-month limit
+  const goToPreviousMonth = () => {
+    // Only navigate if not beyond the 3-month limit
+    if (!isThreeMonthsAgo(currentMonth)) {
+      const prevMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+      setCurrentMonth(prevMonth);
+    }
+  };
+  
+  // Navigate to next month
+  const goToNextMonth = () => {
+    const nextMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+    const today = new Date();
+    
+    // Don't allow going beyond current month
+    if (nextMonth.getMonth() > today.getMonth() && nextMonth.getFullYear() >= today.getFullYear()) {
+      setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    } else {
+      setCurrentMonth(nextMonth);
+    }
+  };
+
+  // تحميل بيانات المستخدم
+  useEffect(() => {
+    const storedUserData = localStorage.getItem("userData");
+    if (storedUserData) {
+      const parsedUserData = JSON.parse(storedUserData);
+      setUserData(parsedUserData);
+      console.log("بيانات المستخدم:", parsedUserData);
+      
+      // إذا لم يكن المستخدم مديراً، فلا يمكنه إضافة خصومات
+      if (parsedUserData.role !== "manager" && parsedUserData.role !== "admin") {
+        console.log("المستخدم ليس مديراً - لا يمكنه إضافة خصومات");
+        toast({
+          title: "صلاحيات محدودة",
+          description: "يمكنك فقط عرض الخصومات الخاصة بك",
+          variant: "default",
+        });
+      }
+    }
+  }, [toast]);
+  
+  // تسجيل بيانات الخصومات للتحقق من المشكلة
+  useEffect(() => {
+    console.log("جميع الخصومات:", deductions);
+    if (userData) {
+      console.log("معرف المستخدم الحالي:", userData.id, typeof userData.id);
+      
+      // فحص كل خصم لمعرفة سبب عدم التطابق
+      deductions.forEach(deduction => {
+        console.log(`مقارنة: ${deduction.employeeId} (${typeof deduction.employeeId}) === ${userData.id} (${typeof userData.id}) = ${String(deduction.employeeId) === String(userData.id)}`);
+      });
+      
+      // التصفية الصحيحة
+      const userDeductions = deductions.filter(d => String(d.employeeId) === String(userData.id));
+      console.log("خصومات المستخدم الحالي:", userDeductions);
+      
+      if (deductions.length > 0) {
+        console.log("معرف الموظف في الخصم الأول:", deductions[0].employeeId, typeof deductions[0].employeeId);
+      }
+    }
+  }, [deductions, userData]);
+  
+  // تنسيق التاريخ للعرض
+  const formatDateForDisplay = (date, format = 'yyyy-MM-dd') => {
+    if (!date) return '';
+    
+    // تنفيذ بسيط للتنسيقات الشائعة
+    if (format === 'yyyy-MM-dd') {
+      return formatDate(date);
+    } else if (format === 'MMMM yyyy') {
+      const months = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+      return `${months[date.getMonth()]} ${date.getFullYear()}`;
+    }
+    
+    return formatDate(date);
+  };
+  
+  // التحقق مما إذا كان التاريخ في الشهر الحالي
+  const isCurrentMonth = (date) => {
+    const today = new Date();
+    return date.getMonth() === today.getMonth() && 
+           date.getFullYear() === today.getFullYear();
+  };
+  
+  // التحقق مما إذا كان التاريخ في أو بعد حد الثلاثة أشهر
+  const isThreeMonthsAgo = (date) => {
+    const today = new Date();
+    const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, 1); // اليوم الأول من الشهر قبل 3 أشهر
+    return date <= threeMonthsAgo;
+  };
+  
+  // الانتقال إلى الشهر السابق مع حد الثلاثة أشهر
+  const goToPreviousMonth = () => {
+    // الانتقال فقط إذا لم يتجاوز حد الثلاثة أشهر
+    if (!isThreeMonthsAgo(currentMonth)) {
+      const prevMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+      setCurrentMonth(prevMonth);
+    }
+  };
+  
+  // الانتقال إلى الشهر التالي
+  const goToNextMonth = () => {
+    const nextMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+    const today = new Date();
+    
+    // لا يسمح بالانتقال بعد الشهر الحالي
+    if (nextMonth.getMonth() > today.getMonth() && nextMonth.getFullYear() >= today.getFullYear()) {
+      setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    } else {
+      setCurrentMonth(nextMonth);
+    }
+  };
+  
+  // تنسيق الشهر والسنة كسلسلة نصية yyyy-MM
+  const formatYearMonth = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+  
+  // الحصول على خصومات موظف معين لشهر معين
+  const getEmployeeDeductionsForMonth = (employeeId, month) => {
+    const monthYearStr = formatYearMonth(month);
+    return deductions.filter(deduction => 
+      String(deduction.employeeId) === String(employeeId) && 
+      deduction.date.startsWith(monthYearStr)
+    );
+  };
+  
+  // الحصول على جميع خصومات شهر معين
+  const getAllDeductionsForMonth = (month) => {
+    const monthYearStr = formatYearMonth(month);
+    return deductions.filter(deduction => 
+      deduction.date.startsWith(monthYearStr)
+    );
+  };
+  
+  // الحصول على إحصائيات خصومات موظف معين لشهر معين
+  const getEmployeeDeductionStats = (employeeId, month) => {
+    const employeeDeductions = getEmployeeDeductionsForMonth(employeeId, month);
+    
+    // حساب إجمالي الخصومات
+    const totalAmount = employeeDeductions.reduce((sum, deduction) => sum + Number(deduction.amount), 0);
+    
+    // حساب عدد الخصومات حسب النوع
+    const deductionsByType = {};
+    deductionTypes.forEach(type => {
+      deductionsByType[type.id] = employeeDeductions.filter(d => d.type === type.id).length;
+    });
+    
+    // الحصول على آخر خصم
+    const lastDeduction = employeeDeductions.length > 0 
+      ? employeeDeductions.sort((a, b) => new Date(b.date) - new Date(a.date))[0] 
+      : null;
+    
+    return {
+      count: employeeDeductions.length,
+      totalAmount,
+      deductionsByType,
+      lastDeduction
+    };
+  };
+
+  // الحصول على الموظفين النشطاء فقط
+  const activeEmployees = employees.filter(emp => emp.status === "active");
+  
+  // تنسيق الشهر والسنة كسلسلة نصية yyyy-MM
+  const formatYearMonth = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+  
+  // الحصول على خصومات موظف معين لشهر معين
+  const getEmployeeDeductionsForMonth = (employeeId, month) => {
+    const monthYearStr = formatYearMonth(month);
+    return deductions.filter(deduction => 
+      String(deduction.employeeId) === String(employeeId) && 
+      deduction.date.startsWith(monthYearStr)
+    );
+  };
+  
+  // الحصول على جميع خصومات شهر معين
+  const getAllDeductionsForMonth = (month) => {
+    const monthYearStr = formatYearMonth(month);
+    return deductions.filter(deduction => 
+      deduction.date.startsWith(monthYearStr)
+    );
+  };
+  
+  // الحصول على إحصائيات خصومات موظف معين لشهر معين
+  const getEmployeeDeductionStats = (employeeId, month) => {
+    const employeeDeductions = getEmployeeDeductionsForMonth(employeeId, month);
+    
+    // حساب إجمالي الخصومات
+    const totalAmount = employeeDeductions.reduce((sum, deduction) => sum + Number(deduction.amount), 0);
+    
+    // حساب عدد الخصومات حسب النوع
+    const deductionsByType = {};
+    deductionTypes.forEach(type => {
+      deductionsByType[type.id] = employeeDeductions.filter(d => d.type === type.id).length;
+    });
+    
+    // الحصول على آخر خصم
+    const lastDeduction = employeeDeductions.length > 0 
+      ? employeeDeductions.sort((a, b) => new Date(b.date) - new Date(a.date))[0] 
+      : null;
+    
+    return {
+      count: employeeDeductions.length,
+      totalAmount,
+      deductionsByType,
+      lastDeduction
+    };
+  };
+
+  // إضافة خصم جديد أو تعديل خصم موجود
+  const addOrUpdateDeduction = () => {
+    if (!selectedEmployee || !deductionType || !deductionAmount) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "يرجى ملء جميع الحقول المطلوبة",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // التأكد من مقارنة المعرفات بشكل صحيح
+    const employee = employees.find(emp => String(emp.id) === String(selectedEmployee));
+    
+    if (!employee) {
+      toast({
+        title: "خطأ",
+        description: "لم يتم العثور على الموظف المحدد",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isEditMode && currentDeduction) {
+      // تحديث خصم موجود
+      const updatedDeductions = deductions.map(d => {
+        if (String(d.id) === String(currentDeduction.id)) {
+          const updatedDeduction = {
+            ...d,
+            type: deductionType,
+            amount: deductionAmount,
+            reason: deductionReason,
+            employeeId: String(d.employeeId), // التأكد من أن معرف الموظف نص
+            updatedAt: new Date().toISOString(),
+            updatedBy: userData?.id ? String(userData.id) : "system" // التأكد من أن معرف المحدث نص
+          };
+          
+          console.log("تحديث الخصم:", updatedDeduction);
+          
+          // إرسال إشعار للموظف المتأثر فقط
+          try {
+            console.log("إرسال إشعار تحديث للموظف:", employee.id, employee.name);
+            
+            const notificationData = {
+              userId: String(employee.id),
+              forUser: String(employee.id), // تحديد الموظف المتأثر فقط
+              title: "تم تعديل خصم",
+              message: `تم تعديل خصم ${getDeductionTypeName(deductionType)} بقيمة ${deductionAmount}`,
+              date: new Date().toISOString(),
+              read: false,
+              type: "deduction",
+              icon: "TrendingDown",
+              color: "red"
+            };
+            
+            console.log("بيانات إشعار التحديث:", notificationData);
+            addNotification(notificationData);
+          } catch (error) {
+            console.error("خطأ في إرسال إشعار التحديث:", error);
+          }
+          
+          return updatedDeduction;
+        }
+        return d;
+      });
+      
+      setDeductions(updatedDeductions);
+      
+      toast({
+        title: "تم التحديث",
+        description: `تم تحديث خصم ${getDeductionTypeName(deductionType)} للموظف ${employee.name}`,
+      });
+    } else {
+      // إنشاء خصم جديد
+      const newDeduction = {
+        id: Date.now().toString(), // تحويل إلى نص
+        employeeId: String(selectedEmployee), // التأكد من أن معرف الموظف نص
+        employeeName: employee.name,
+        type: deductionType,
+        amount: deductionAmount,
+        reason: deductionReason,
+        date: new Date().toISOString(),
+        createdBy: userData?.id ? String(userData.id) : "system", // التأكد من أن معرف المنشئ نص
+        createdAt: new Date().toISOString()
+      };
+      
+      console.log("إضافة خصم جديد:", newDeduction);
+      setDeductions([...deductions, newDeduction]);
+      
+      // إرسال إشعار للموظف المتأثر فقط
+      try {
+        console.log("إرسال إشعار للموظف:", employee.id, employee.name);
+        
+        const notificationData = {
+          userId: String(employee.id),
+          forUser: String(employee.id), // تحديد الموظف المتأثر فقط
+          title: "خصم جديد",
+          message: `تم إضافة خصم ${getDeductionTypeName(deductionType)} بقيمة ${deductionAmount}`,
+          date: new Date().toISOString(),
+          read: false,
+          type: "deduction",
+          icon: "TrendingDown",
+          color: "red"
+        };
+        
+        console.log("بيانات الإشعار:", notificationData);
+        addNotification(notificationData);
+      } catch (error) {
+        console.error("خطأ في إرسال الإشعار:", error);
+      }
+      
+      toast({
+        title: "تمت الإضافة",
+        description: `تم إضافة خصم ${getDeductionTypeName(deductionType)} للموظف ${employee.name}`,
+      });
+    }
+    
+    // إغلاق مربع الحوار وإعادة تعيين النموذج
+    setIsDialogOpen(false);
+    resetForm();
+  };
+
+  // حذف خصم
+  const deleteDeduction = () => {
+    if (!deductionToDelete) return;
+    
+    // البحث عن الموظف - مقارنة المعرفات كسلاسل نصية
+    const employee = employees.find(emp => String(emp.id) === String(deductionToDelete.employeeId));
+    
+    // حذف الخصم
+    const updatedDeductions = deductions.filter(d => d.id !== deductionToDelete.id);
+    setDeductions(updatedDeductions);
+    
+    // إرسال إشعار للموظف المتأثر فقط
+    if (employee) {
+      try {
+        console.log("إرسال إشعار حذف للموظف:", employee.id, employee.name);
+        
+        const notificationData = {
+          userId: String(employee.id),
+          forUser: String(employee.id), // تحديد الموظف المتأثر فقط
+          title: "تم حذف خصم",
+          message: `تم حذف خصم ${getDeductionTypeName(deductionToDelete.type)} بقيمة ${deductionToDelete.amount}`,
+          date: new Date().toISOString(),
+          read: false,
+          type: "deduction",
+          icon: "TrendingDown",
+          color: "red"
+        };
+        
+        console.log("بيانات إشعار الحذف:", notificationData);
+        addNotification(notificationData);
+      } catch (error) {
+        console.error("خطأ في إرسال إشعار الحذف:", error);
+      }
+    }
+    
+    toast({
+      title: "تم الحذف",
+      description: `تم حذف الخصم بنجاح`,
+    });
+    
+    // إغلاق مربع حوار التأكيد
+    setIsDeleteDialogOpen(false);
+    setDeductionToDelete(null);
+  };
+
+  // إعداد نموذج التعديل
+  const setupEditForm = (deduction) => {
+    setCurrentDeduction(deduction);
+    setSelectedEmployee(deduction.employeeId);
+    setDeductionType(deduction.type);
+    setDeductionAmount(deduction.amount);
+    setDeductionReason(deduction.reason || "");
+    setIsEditMode(true);
+    setIsDialogOpen(true);
+  };
+
+  // إعداد نموذج الحذف
+  const setupDeleteDialog = (deduction) => {
+    setDeductionToDelete(deduction);
+    setIsDeleteDialogOpen(true);
+  };
+
+  // إعادة تعيين النموذج
+  const resetForm = () => {
+    setSelectedEmployee(null);
+    setDeductionType("");
+    setDeductionAmount("");
+    setDeductionReason("");
+    setIsEditMode(false);
+    setCurrentDeduction(null);
+  };
+
+  // الحصول على خصومات الشهر الحالي
+  const currentMonthDeductions = deductions.filter(deduction => {
+    const deductionDate = new Date(deduction.date);
+    return formatYearMonth(deductionDate) === formatYearMonth(currentMonth);
+  });
+
+  // الحصول على أيقونة نوع الخصم
+  const getDeductionTypeIcon = (typeId) => {
+    const type = deductionTypes.find(t => t.id === typeId);
+    if (!type) return <AlertCircle className="h-5 w-5 text-gray-500" />;
+    
+    const IconComponent = type.icon;
+    
+    let colorClass = "text-gray-500";
+    if (type.color === "red") colorClass = "text-red-500";
+    else if (type.color === "amber") colorClass = "text-amber-500";
+    else if (type.color === "orange") colorClass = "text-orange-500";
+    else if (type.color === "purple") colorClass = "text-purple-500";
+    else if (type.color === "blue") colorClass = "text-blue-500";
+    
+    return <IconComponent className={`h-5 w-5 ${colorClass}`} />;
+  };
+
+  // الحصول على اسم نوع الخصم
+  const getDeductionTypeName = (typeId) => {
+    return deductionTypes.find(t => t.id === typeId)?.label || "غير معروف";
+  };
+
+  // الحصول على فئة اللون لنوع الخصم
+  const getDeductionTypeColorClasses = (typeId) => {
+    const type = deductionTypes.find(t => t.id === typeId);
+    if (!type) return "";
+    
+    let bgClass = "bg-gray-100";
+    let textClass = "text-gray-800";
+    
+    if (type.color === "red") {
+      bgClass = "bg-red-100";
+      textClass = "text-red-800";
+    } else if (type.color === "amber") {
+      bgClass = "bg-amber-100";
+      textClass = "text-amber-800";
+    } else if (type.color === "orange") {
+      bgClass = "bg-orange-100";
+      textClass = "text-orange-800";
+    } else if (type.color === "purple") {
+      bgClass = "bg-purple-100";
+      textClass = "text-purple-800";
+    } else if (type.color === "blue") {
+      bgClass = "bg-blue-100";
+      textClass = "text-blue-800";
+    }
+    
+    return `${bgClass} ${textClass}`;
+  };
+
+  return (
+    <div className="container mx-auto py-6">
+      <h1 className="text-3xl font-bold mb-6">سجل الخصومات</h1>
+
+      {/* بطاقة التنقل بين الأشهر */}
+      <Card className="mb-6">
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+            {/* أزرار التنقل بين الأشهر */}
+            <div className="flex items-center gap-4">
+              {/* زر السهم الأيمن */}
+              <div className="flex flex-col items-center">
+                <Button 
+                  variant="outline"
+                  size="icon"
+                  onClick={goToPreviousMonth}
+                  disabled={isThreeMonthsAgo(currentMonth)}
+                  className="h-11 w-11 mb-1 rounded-full bg-red-50 hover:bg-red-100 shadow-sm transition-all duration-300 ease-in-out"
+                  title="الشهر السابق"
+                >
+                  <ChevronRight className="h-6 w-6 text-red-600" />
+                </Button>
+                <span className="text-xs text-gray-500">الشهر السابق</span>
+              </div>
+
+              {/* العنوان في المنتصف */}
+              <div className="flex flex-col items-center justify-center">
+                <CardTitle className="text-center text-xl text-red-700 flex items-center justify-center gap-2">
+                  <TrendingDown className="h-5 w-5" />
+                  سجل الخصومات
+                </CardTitle>
+                <span className="text-sm font-medium text-gray-500 mt-1">
+                  {formatDateForDisplay(currentMonth, 'MMMM yyyy')}
+                  {isCurrentMonth(currentMonth) && <span className="mr-2 text-green-500">(الشهر الحالي)</span>}
+                </span>
+              </div>
+
+              {/* زر السهم الأيسر */}
+              <div className="flex flex-col items-center">
+                <Button 
+                  variant="outline"
+                  size="icon"
+                  onClick={isCurrentMonth(currentMonth) ? undefined : goToNextMonth}
+                  disabled={isCurrentMonth(currentMonth)}
+                  className="h-11 w-11 mb-1 rounded-full bg-red-50 hover:bg-red-100 shadow-sm transition-all duration-300 ease-in-out"
+                  title="الشهر التالي"
+                >
+                  <ChevronLeft className="h-6 w-6 text-red-600" />
+                </Button>
+                <span className="text-xs text-gray-500">الشهر التالي</span>
+              </div>
+            </div>
+
+            {/* زر إضافة خصم جديد للمدير والمسؤول */}
+            {userData && (userData.role === "admin" || userData.role === "manager") && (
+              <Button 
+                onClick={() => {
+                  setIsEditMode(false);
+                  setSelectedEmployee("");
+                  setDeductionType("");
+                  setDeductionAmount("");
+                  setDeductionReason("");
+                  setIsDialogOpen(true);
+                }}
+                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2"
+              >
+                <TrendingDown className="h-4 w-4" />
+                إضافة خصم جديد
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+      </Card>
+
+      {userData && (userData.role === "manager" || userData.role === "admin") && (
+        <>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>{isEditMode ? "تعديل الخصم" : "إضافة خصم جديد"}</DialogTitle>
+                <DialogDescription>
+                  {isEditMode 
+                    ? "قم بتعديل بيانات الخصم المحدد"
+                    : "قم بإدخال بيانات الخصم الجديد للموظف"}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="employee" className="text-right col-span-1">
+                    الموظف
+                  </Label>
+                  <Select
+                    value={selectedEmployee}
+                    onValueChange={setSelectedEmployee}
+                    disabled={isEditMode}
+                    className="col-span-3"
+                  >
+                    <SelectTrigger id="employee">
+                      <SelectValue placeholder="اختر الموظف" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeEmployees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.id}>
+                          {employee.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="type" className="text-right col-span-1">
+                    نوع الخصم
+                  </Label>
+                  <Select
+                    value={deductionType}
+                    onValueChange={setDeductionType}
+                    className="col-span-3"
+                  >
+                    <SelectTrigger id="type">
+                      <SelectValue placeholder="اختر نوع الخصم" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {deductionTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          <div className="flex items-center gap-2">
+                            <type.icon className={`h-4 w-4 text-${type.color}-500`} />
+                            <span>{type.label}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="amount" className="text-right col-span-1">
+                    القيمة
+                  </Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    min="0"
+                    value={deductionAmount}
+                    onChange={(e) => setDeductionAmount(e.target.value)}
+                    className="col-span-3"
+                    placeholder="أدخل قيمة الخصم"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="reason" className="text-right col-span-1">
+                    السبب
+                  </Label>
+                  <Textarea
+                    id="reason"
+                    value={deductionReason}
+                    onChange={(e) => setDeductionReason(e.target.value)}
+                    className="col-span-3 min-h-[80px]"
+                    placeholder="أدخل سبب الخصم"
+                  />
+                </div>
+              </div>
+              
+              <DialogFooter>
+                <Button onClick={addOrUpdateDeduction}>
+                  {isEditMode ? "تحديث الخصم" : "إضافة الخصم"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle className="text-red-600">تأكيد حذف الخصم</DialogTitle>
+                <DialogDescription>
+                  هل أنت متأكد من رغبتك في حذف هذا الخصم؟ هذا الإجراء لا يمكن التراجع عنه.
+                </DialogDescription>
+              </DialogHeader>
+              
+              {deductionToDelete && (
+                <div className="py-4 border rounded-md p-3 bg-gray-50">
+                  <div className="flex justify-between mb-2">
+                    <span className="font-medium">الموظف:</span>
+                    <span>{deductionToDelete.employeeName}</span>
+                  </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="font-medium">نوع الخصم:</span>
+                    <span>{getDeductionTypeName(deductionToDelete.type)}</span>
+                  </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="font-medium">القيمة:</span>
+                    <span className="text-red-600 font-bold">{deductionToDelete.amount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">التاريخ:</span>
+                    <span>{formatDate(deductionToDelete.date)}</span>
+                  </div>
+                </div>
+              )}
+              
+              <DialogFooter className="mt-4">
+                <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>إلغاء</Button>
+                <Button variant="destructive" onClick={deleteDeduction}>تأكيد الحذف</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+
+      {/* عرض جميع الخصومات للمديرين فقط */}
+      {userData && (userData.role === "manager" || userData.role === "admin") && (
+        <Card>
+          <CardHeader>
+            <CardTitle>خصومات الشهر الحالي - {formatDate(currentMonth.toISOString())}</CardTitle>
+            <CardDescription>
+              قائمة بجميع الخصومات المسجلة للموظفين خلال الشهر الحالي
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {currentMonthDeductions.length === 0 ? (
+              <div className="text-center py-10 text-gray-500">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <h3 className="text-lg font-medium">لا توجد خصومات</h3>
+                <p className="mt-2">لم يتم تسجيل أي خصومات للموظفين خلال الشهر الحالي</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>الموظف</TableHead>
+                      <TableHead>نوع الخصم</TableHead>
+                      <TableHead>القيمة</TableHead>
+                      <TableHead>السبب</TableHead>
+                      <TableHead>التاريخ</TableHead>
+                      <TableHead>بواسطة</TableHead>
+                      <TableHead className="text-center">الإجراءات</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentMonthDeductions.map((deduction) => (
+                      <TableRow key={deduction.id}>
+                        <TableCell className="font-medium">{deduction.employeeName}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {getDeductionTypeIcon(deduction.type)}
+                            <Badge variant="outline" className={getDeductionTypeColorClasses(deduction.type)}>
+                              {getDeductionTypeName(deduction.type)}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-bold text-red-600">{deduction.amount}</TableCell>
+                        <TableCell className="max-w-xs truncate">{deduction.reason || "—"}</TableCell>
+                        <TableCell>{formatDate(deduction.date)}</TableCell>
+                        <TableCell>
+                          {employees.find(emp => emp.id === deduction.createdBy)?.name || "النظام"}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-center gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                              onClick={() => setupEditForm(deduction)}
+                              title="تعديل الخصم"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                                <path d="m15 5 4 4"></path>
+                              </svg>
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-red-600 hover:text-red-800 hover:bg-red-100"
+                              onClick={() => setupDeleteDialog(deduction)}
+                              title="حذف الخصم"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18"></path>
+                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                              </svg>
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* عرض الخصومات الخاصة بالموظف الحالي فقط */}
+      {userData && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>
+              {userData.role === "employee" ? "الخصومات الخاصة بك" : "خصوماتك الشخصية"}
+            </CardTitle>
+            <CardDescription>
+              قائمة بجميع الخصومات المسجلة لك - {formatDateForDisplay(currentMonth, 'MMMM yyyy')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* تصحيح مشكلة المقارنة - التأكد من أن المقارنة تتم بشكل صحيح */}
+            {getEmployeeDeductionsForMonth(userData.id, currentMonth).length === 0 ? (
+              <div className="text-center py-10 text-gray-500">
+                <TrendingDown className="h-12 w-12 mx-auto mb-4 text-red-400" />
+                <h3 className="text-lg font-medium">لا توجد خصومات</h3>
+                <p className="mt-2">لم يتم تسجيل أي خصومات لك في هذا الشهر</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingDown className="h-5 w-5 text-red-500" />
+                    <h3 className="font-medium text-red-800">ملخص الخصومات لشهر {formatDateForDisplay(currentMonth, 'MMMM yyyy')}</h3>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {/* إحصائيات خصومات الموظف */}
+                    <div className="bg-white p-3 rounded-md border border-red-100 shadow-sm">
+                      <div className="text-sm text-gray-600">عدد الخصومات</div>
+                      <div className="text-xl font-bold text-red-600 mt-1">
+                        {getEmployeeDeductionStats(userData.id, currentMonth).count}
+                      </div>
+                    </div>
+                    <div className="bg-white p-3 rounded-md border border-red-100 shadow-sm">
+                      <div className="text-sm text-gray-600">إجمالي الخصومات</div>
+                      <div className="text-xl font-bold text-red-600 mt-1">
+                        {getEmployeeDeductionStats(userData.id, currentMonth).totalAmount}
+                      </div>
+                    </div>
+                    <div className="bg-white p-3 rounded-md border border-red-100 shadow-sm">
+                      <div className="text-sm text-gray-600">خصومات الغياب</div>
+                      <div className="text-xl font-bold text-red-600 mt-1">
+                        {getEmployeeDeductionStats(userData.id, currentMonth).deductionsByType.absence || 0}
+                      </div>
+                    </div>
+                    <div className="bg-white p-3 rounded-md border border-red-100 shadow-sm">
+                      <div className="text-sm text-gray-600">خصومات التأخير</div>
+                      <div className="text-xl font-bold text-red-600 mt-1">
+                        {getEmployeeDeductionStats(userData.id, currentMonth).deductionsByType.late || 0}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>نوع الخصم</TableHead>
+                      <TableHead>القيمة</TableHead>
+                      <TableHead>السبب</TableHead>
+                      <TableHead>التاريخ</TableHead>
+                      <TableHead>بواسطة</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {getEmployeeDeductionsForMonth(userData.id, currentMonth)
+                      .sort((a, b) => new Date(b.date) - new Date(a.date))
+                      .map((deduction) => (
+                        <TableRow key={deduction.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getDeductionTypeIcon(deduction.type)}
+                              <Badge variant="outline" className={getDeductionTypeColorClasses(deduction.type)}>
+                                {getDeductionTypeName(deduction.type)}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-bold text-red-600">{deduction.amount}</TableCell>
+                          <TableCell className="max-w-xs truncate">{deduction.reason || "—"}</TableCell>
+                          <TableCell>{formatDate(deduction.date)}</TableCell>
+                          <TableCell>
+                            {employees.find(emp => emp.id === deduction.createdBy)?.name || "النظام"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

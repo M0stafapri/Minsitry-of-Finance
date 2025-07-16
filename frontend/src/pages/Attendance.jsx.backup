@@ -1,0 +1,883 @@
+import React, { useState, useEffect } from "react";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { useNotifications } from "@/context/NotificationsContext";
+import { Calendar as CalendarIcon, Clock, CheckCircle, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/components/ui/use-toast";
+
+// Test data for debugging
+const TEST_EMPLOYEES = [
+  { id: "emp1", name: "أحمد محمد", role: "employee" },
+  { id: "emp2", name: "سارة أحمد", role: "employee" },
+  { id: "emp3", name: "محمود حسن", role: "employee" },
+];
+
+const generateTestAttendance = () => {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const records = [];
+  
+  // Generate records for the past 10 days for each employee
+  TEST_EMPLOYEES.forEach(emp => {
+    // Add today's record first (guarantees all employees have a record for today)
+    records.push({
+      id: `${emp.id}-${todayStr}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      date: todayStr,
+      checkIn: '08:10:00',
+      checkOut: today.getHours() >= 17 ? '17:05:00' : null // Add checkout only if after 5PM
+    });
+    
+    // Generate records for past days
+    for (let i = 1; i < 10; i++) { // Start from 1 to skip today (we already added it)
+      const day = new Date(today);
+      day.setDate(today.getDate() - i);
+      
+      // Skip Fridays
+      if (day.getDay() === 5) continue;
+      
+      const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      
+      // Generate check-in for all days
+      const checkInHour = 8 + Math.floor(Math.random() * 2); // Random hour between 8-9
+      const checkInMin = Math.floor(Math.random() * 30); // Random minute between 0-29
+      const checkIn = `${String(checkInHour).padStart(2, '0')}:${String(checkInMin).padStart(2, '0')}:00`;
+      
+      // Generate check-out for most days (80% chance)
+      let checkOut = null;
+      if (Math.random() > 0.2) {
+        const checkOutHour = 17 + Math.floor(Math.random() * 2); // Random hour between 17-18
+        const checkOutMin = Math.floor(Math.random() * 30); // Random minute between 0-29
+        checkOut = `${String(checkOutHour).padStart(2, '0')}:${String(checkOutMin).padStart(2, '0')}:00`;
+      }
+      
+      records.push({
+        id: `${emp.id}-${dateStr}`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        date: dateStr,
+        checkIn, 
+        checkOut
+      });
+    }
+  });
+  
+  return records;
+};
+
+export default function Attendance() {
+  const [userData, setUserData] = useState(null);
+  const [attendance, setAttendance] = useLocalStorage("attendance", []);
+  const [employees, setEmployees] = useLocalStorage("employees", []);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const { toast } = useToast();
+  const { addNotification } = useNotifications();
+  
+  // Add test data if no data exists
+  useEffect(() => {
+    if (employees.length === 0) {
+      setEmployees(TEST_EMPLOYEES);
+    }
+    
+    if (attendance.length === 0) {
+      setAttendance(generateTestAttendance());
+    }
+  }, [employees, attendance, setEmployees, setAttendance]);
+  
+  // Create notification for check-in
+  const notifyCheckIn = (employeeName, time) => {
+    addNotification({
+      type: 'attendance-check-in',
+      title: 'تسجيل الحضور',
+      message: `تم تسجيل حضورك اليوم في الساعة ${time}`,
+      icon: 'Clock',
+      color: 'blue',
+      forUser: employeeName
+    });
+  };
+  
+  // Create notification for check-out
+  const notifyCheckOut = (employeeName, time) => {
+    addNotification({
+      type: 'attendance-check-out',
+      title: 'تسجيل الانصراف',
+      message: `تم تسجيل انصرافك اليوم في الساعة ${time}`,
+      icon: 'CheckCircle2',
+      color: 'green',
+      forUser: employeeName
+    });
+  };
+
+  // Load user data
+  useEffect(() => {
+    try {
+      const storedUserData = localStorage.getItem('userData');
+      if (storedUserData) {
+        setUserData(JSON.parse(storedUserData));
+      }
+    } catch (error) {
+      console.error('خطأ في قراءة بيانات المستخدم:', error);
+    }
+  }, []);
+
+  // Get days in current month
+  const daysInMonth = React.useMemo(() => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const daysCount = new Date(year, month + 1, 0).getDate();
+    
+    // Create array with all days of the month
+    const days = [];
+    for (let i = 1; i <= daysCount; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  }, [currentMonth]);
+
+  // Format date as yyyy-MM-dd
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Format date as yyyy-MM
+  const formatYearMonth = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  // Format time as HH:mm:ss
+  const formatTime = (date) => {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  };
+
+  // Check if date is today
+  const isToday = (date) => {
+    const today = new Date();
+    return date.getDate() === today.getDate() &&
+           date.getMonth() === today.getMonth() &&
+           date.getFullYear() === today.getFullYear();
+  };
+  
+  // Check if date is in the future
+  const isFuture = (date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+    return date > today;
+  };
+  
+  // Check if a date is at or beyond the 3-month limit
+  const isThreeMonthsAgo = (date) => {
+    const today = new Date();
+    const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, 1); // First day of month 3 months ago
+    return date <= threeMonthsAgo;
+  };
+  
+  // Check if date is in the current month
+  const isCurrentMonth = (date) => {
+    const today = new Date();
+    return date.getMonth() === today.getMonth() && 
+           date.getFullYear() === today.getFullYear();
+  };
+  
+  // Check if current time is after 5:00 PM
+  const isAfter5PM = () => {
+    const now = new Date();
+    return now.getHours() >= 17; // 17 is 5:00 PM in 24-hour format
+  };
+  
+  // Navigate to previous month with 3-month limit
+  const goToPreviousMonth = () => {
+    // Only navigate if not beyond the 3-month limit
+    if (!isThreeMonthsAgo(currentMonth)) {
+      const prevMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+      setCurrentMonth(prevMonth);
+    }
+    // Button will be disabled at the 3-month limit, so no need for a message
+  };
+  
+  // Navigate to next month
+  const goToNextMonth = () => {
+    const nextMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+    const today = new Date();
+    
+    // Don't allow going beyond current month
+    if (nextMonth.getMonth() > today.getMonth() && nextMonth.getFullYear() >= today.getFullYear()) {
+      setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    } else {
+      setCurrentMonth(nextMonth);
+    }
+  };
+
+  // Check if date is Friday
+  const isFriday = (date) => {
+    return date.getDay() === 5; // 5 is Friday (0 is Sunday, 6 is Saturday)
+  };
+
+  // Format date for display
+  const formatDateForDisplay = (date, formatStr) => {
+    const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const months = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    
+    if (formatStr === 'EEEE, d MMMM yyyy') {
+      return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    } else if (formatStr === 'MMMM yyyy') {
+      return `${months[date.getMonth()]} ${date.getFullYear()}`;
+    } else if (formatStr === 'EEEE') {
+      return days[date.getDay()];
+    } else if (formatStr === 'd MMMM') {
+      return `${date.getDate()} ${months[date.getMonth()]}`;
+    }
+    
+    return formatDate(date);
+  };
+
+  // Get employee attendance records for the current month
+  const getEmployeeAttendance = (employeeId) => {
+    const monthYear = formatYearMonth(currentMonth);
+    return attendance.filter(record => 
+      record.employeeId === employeeId && 
+      record.date.startsWith(monthYear)
+    );
+  };
+
+  // Check if employee has checked in/out for a specific date
+  const getAttendanceForDate = (employeeId, date) => {
+    const dateStr = formatDate(date);
+    return attendance.find(record => 
+      record.employeeId === employeeId && 
+      record.date === dateStr
+    );
+  };
+
+  // Handle check in
+  const handleCheckIn = () => {
+    if (!userData) return;
+    
+    const today = new Date();
+    const dateStr = formatDate(today);
+    const timeStr = formatTime(today);
+    
+    // Check if already checked in today
+    const existingRecord = attendance.find(record => 
+      record.employeeId === userData.id && 
+      record.date === dateStr
+    );
+    
+    if (existingRecord && existingRecord.checkIn) {
+      toast({
+        title: "تم تسجيل الحضور مسبقاً",
+        description: `لقد قمت بتسجيل حضورك اليوم في الساعة ${existingRecord.checkIn}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Create new record or update existing
+    if (existingRecord) {
+      const updatedAttendance = attendance.map(record => 
+        record.employeeId === userData.id && record.date === dateStr
+          ? { ...record, checkIn: timeStr }
+          : record
+      );
+      setAttendance(updatedAttendance);
+    } else {
+      const newRecord = {
+        id: Date.now().toString(),
+        employeeId: userData.id,
+        employeeName: userData.name,
+        date: dateStr,
+        checkIn: timeStr,
+        checkOut: null
+      };
+      setAttendance([...attendance, newRecord]);
+    }
+    
+    // Send notification
+    notifyCheckIn(userData.name, timeStr);
+    
+    toast({
+      title: "تم تسجيل الحضور بنجاح",
+      description: `تم تسجيل حضورك في الساعة ${timeStr}`,
+    });
+  };
+  
+  // Handle check out
+  const handleCheckOut = () => {
+    if (!userData) return;
+    
+    const today = new Date();
+    const dateStr = formatDate(today);
+    const timeStr = formatTime(today);
+    
+    // Check if it's after 5:00 PM
+    const isAfter5PM = today.getHours() >= 17; // 17 is 5:00 PM in 24-hour format
+    
+    if (!isAfter5PM) {
+      toast({
+        title: "لا يمكن تسجيل الانصراف قبل الساعة 5:00 مساءً",
+        description: "يرجى الانتظار حتى الساعة 5:00 مساءً لتسجيل الانصراف",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Check if already checked in today
+    const existingRecord = attendance.find(record => 
+      record.employeeId === userData.id && 
+      record.date === dateStr
+    );
+    
+    if (!existingRecord || !existingRecord.checkIn) {
+      toast({
+        title: "لم يتم تسجيل الحضور",
+        description: "يجب تسجيل الحضور أولاً قبل تسجيل الانصراف",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (existingRecord.checkOut) {
+      toast({
+        title: "تم تسجيل الانصراف مسبقاً",
+        description: `لقد قمت بتسجيل انصرافك اليوم في الساعة ${existingRecord.checkOut}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Update record with check out time
+    const updatedAttendance = attendance.map(record => 
+      record.employeeId === userData.id && record.date === dateStr
+        ? { ...record, checkOut: timeStr }
+        : record
+    );
+    
+    setAttendance(updatedAttendance);
+    
+    // Send notification
+    notifyCheckOut(userData.name, timeStr);
+    
+    toast({
+      title: "تم تسجيل الانصراف بنجاح",
+      description: `تم تسجيل انصرافك في الساعة ${timeStr}`,
+    });
+  };
+  
+  // Add a dummy attendance record for testing if none exist
+  useEffect(() => {
+    if (attendance.length === 0 && employees.length > 0) {
+      // Only add if we have employees but no attendance records
+      const demoEmployee = employees.find(emp => emp.role === "employee");
+      if (demoEmployee) {
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+        
+        const demoRecords = [
+          {
+            id: "demo1",
+            employeeId: demoEmployee.id,
+            employeeName: demoEmployee.name,
+            date: formatDate(yesterday),
+            checkIn: "08:30:00",
+            checkOut: "17:15:00"
+          },
+          {
+            id: "demo2",
+            employeeId: demoEmployee.id,
+            employeeName: demoEmployee.name,
+            date: formatDate(today),
+            checkIn: "08:15:00",
+            checkOut: null
+          }
+        ];
+        
+        setAttendance([...attendance, ...demoRecords]);
+      }
+    }
+  }, [employees, attendance, setAttendance]);
+  
+  // Determine attendance status for a specific day
+  const getAttendanceStatus = (employeeId, date) => {
+    // Skip for future days or Fridays
+    if (isFuture(date) || isFriday(date)) {
+      return null;
+    }
+    
+    const dateStr = formatDate(date);
+    const record = attendance.find(rec => 
+      rec.employeeId === employeeId && 
+      rec.date === dateStr
+    );
+    
+    if (!record || !record.checkIn) {
+      // If no check-in record exists and the date is in the past, count as absence
+      if (date < new Date()) {
+        return 'absent';
+      }
+      return null; // For today, don't mark as absent yet
+    } else if (record.checkIn && !record.checkOut) {
+      return 'partial';
+    } else if (record.checkIn && record.checkOut) {
+      return 'complete';
+    }
+    
+    return null;
+  };
+  
+  // Calculate attendance statistics
+  const getAttendanceStats = (employeeId) => {
+    // Get all days this month up to today (excluding future days)
+    const today = new Date();
+    const pastDaysThisMonth = daysInMonth.filter(day => 
+      !isFuture(day) && !isFriday(day) && day <= today
+    );
+    const workDays = pastDaysThisMonth.length;
+    
+    // Initialize counters
+    let attendedDays = 0;
+    let completeDays = 0;
+    let partialDays = 0;
+    let absentDays = 0;
+    
+    // Get all attendance records for this employee this month
+    const monthYearStr = formatYearMonth(currentMonth);
+    const employeeRecords = attendance.filter(record => 
+      record.employeeId === employeeId && 
+      record.date.startsWith(monthYearStr)
+    );
+    
+    // Count each day's status
+    pastDaysThisMonth.forEach(day => {
+      const dateStr = formatDate(day);
+      const recordForDay = employeeRecords.find(rec => rec.date === dateStr);
+      
+      if (recordForDay) {
+        // We have a record for this day
+        if (recordForDay.checkIn && recordForDay.checkOut) {
+          // Complete attendance
+          completeDays++;
+          attendedDays++;
+        } else if (recordForDay.checkIn) {
+          // Partial attendance (only check-in)
+          partialDays++;
+          attendedDays++;
+        }
+      } else {
+        // No record for this day - counted as absent
+        absentDays++;
+      }
+    });
+    
+    // Calculate attendance rate
+    const attendanceRate = workDays > 0 ? Math.round((attendedDays / workDays) * 100) : 0;
+    
+    return {
+      workDays,
+      attendedDays,
+      completeDays,
+      partialDays,
+      absentDays,
+      attendanceRate
+    };
+  };
+
+  return (
+    <div className="container mx-auto py-6">
+      <h1 className="text-3xl font-bold mb-6">سجل الحضور والانصراف</h1>
+      
+      {/* Today's attendance card for current employee */}
+      {userData && userData.role === "employee" && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>تسجيل الحضور والانصراف - اليوم</CardTitle>
+            <CardDescription>
+              {formatDateForDisplay(new Date(), 'EEEE, d MMMM yyyy')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row gap-6 items-center justify-between">
+              <div className="text-center md:text-right">
+                <h3 className="text-lg font-medium mb-2">مرحباً {userData.name}</h3>
+                <p className="text-gray-500">قم بتسجيل حضورك وانصرافك لليوم</p>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-4">
+                {isToday(new Date()) && !isFriday(new Date()) ? (
+                  <>
+                    <Button 
+                      onClick={handleCheckIn}
+                      className="flex items-center gap-2"
+                      variant="default"
+                      disabled={getAttendanceForDate(userData.id, new Date())?.checkIn}
+                    >
+                      <Clock className="h-4 w-4" />
+                      تسجيل الحضور
+                    </Button>
+                    <Button 
+                      onClick={handleCheckOut}
+                      className="flex items-center gap-2"
+                      variant={getAttendanceForDate(userData.id, new Date())?.checkIn ? "default" : "outline"}
+                      disabled={!getAttendanceForDate(userData.id, new Date())?.checkIn || getAttendanceForDate(userData.id, new Date())?.checkOut || !isAfter5PM()}
+                    >
+                      <Clock className="h-4 w-4" />
+                      تسجيل الانصراف
+                    </Button>
+                  </>
+                ) : (
+                  <Badge variant="outline" className="py-2 px-4">
+                    {isFriday(new Date()) 
+                      ? "اليوم الجمعة - لا يتطلب تسجيل حضور" 
+                      : "لا يمكن تسجيل الحضور إلا في اليوم الحالي"}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            
+            {/* Today's status */}
+            {isToday(new Date()) && !isFriday(new Date()) && (
+              <div className="mt-6 p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
+                <h4 className="font-medium mb-2">حالة اليوم:</h4>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">الحضور:</span>
+                    {getAttendanceForDate(userData.id, new Date())?.checkIn ? (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-4 w-4 text-green-500 ml-1" />
+                        <span className="text-green-600">{getAttendanceForDate(userData.id, new Date())?.checkIn}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center">
+                        <XCircle className="h-4 w-4 text-gray-400 ml-1" />
+                        <span className="text-gray-400">لم يتم التسجيل</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">الانصراف:</span>
+                    {getAttendanceForDate(userData.id, new Date())?.checkOut ? (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-4 w-4 text-green-500 ml-1" />
+                        <span className="text-green-600">{getAttendanceForDate(userData.id, new Date())?.checkOut}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center">
+                        <XCircle className="h-4 w-4 text-gray-400 ml-1" />
+                        <span className="text-gray-400">لم يتم التسجيل</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      
+      {/* Monthly attendance table */}
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle>سجل الحضور - {formatDateForDisplay(currentMonth, 'MMMM yyyy')}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={goToPreviousMonth}
+                disabled={isThreeMonthsAgo(currentMonth)}
+              >
+                الشهر السابق
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={isCurrentMonth(currentMonth) ? undefined : goToNextMonth}
+                disabled={isCurrentMonth(currentMonth)}
+              >
+                {isCurrentMonth(currentMonth) ? "الشهر الحالي" : "الشهر التالي"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {userData && userData.role === "employee" ? (
+            // Employee view - show only their attendance
+            <>
+              <div className="mb-4 p-4 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700">
+                <h3 className="font-medium mb-4 text-indigo-700 dark:text-indigo-300 flex items-center">
+                  <Clock className="h-5 w-5 ml-2" />
+                  إحصائيات الحضور:
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/30 rounded-lg shadow-sm border-r-4 border-blue-400 hover:shadow-md transition-all">
+                    <p className="text-sm text-blue-600 dark:text-blue-300 mb-1">أيام العمل</p>
+                    <p className="text-3xl font-bold text-blue-700 dark:text-blue-200">{getAttendanceStats(userData.id).workDays}</p>
+                  </div>
+                  <div className="p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/30 rounded-lg shadow-sm border-r-4 border-emerald-400 hover:shadow-md transition-all">
+                    <p className="text-sm text-emerald-600 dark:text-emerald-300 mb-1">أيام الحضور الكامل</p>
+                    <p className="text-3xl font-bold text-emerald-700 dark:text-emerald-200">{getAttendanceStats(userData.id).completeDays}</p>
+                  </div>
+                  <div className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/20 dark:to-amber-800/30 rounded-lg shadow-sm border-r-4 border-amber-400 hover:shadow-md transition-all">
+                    <p className="text-sm text-amber-600 dark:text-amber-300 mb-1">الحضور الجزئي</p>
+                    <p className="text-3xl font-bold text-amber-700 dark:text-amber-200">{getAttendanceStats(userData.id).partialDays}</p>
+                  </div>
+                  <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/30 rounded-lg shadow-sm border-r-4 border-red-400 hover:shadow-md transition-all">
+                    <p className="text-sm text-red-600 dark:text-red-300 mb-1">أيام الغياب</p>
+                    <p className="text-3xl font-bold text-red-700 dark:text-red-200">{getAttendanceStats(userData.id).absentDays}</p>
+                  </div>
+                  <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/30 rounded-lg shadow-sm border-r-4 border-purple-400 hover:shadow-md transition-all">
+                    <p className="text-sm text-purple-600 dark:text-purple-300 mb-1">نسبة الحضور</p>
+                    <p className="text-3xl font-bold text-purple-700 dark:text-purple-200">{getAttendanceStats(userData.id).attendanceRate}%</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>اليوم</TableHead>
+                      <TableHead>التاريخ</TableHead>
+                      <TableHead>الحضور</TableHead>
+                      <TableHead>الانصراف</TableHead>
+                      <TableHead>الحالة</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {daysInMonth.map(day => {
+                      const record = getAttendanceForDate(userData.id, day);
+                      const isFri = isFriday(day);
+                      const isFutureDay = isFuture(day);
+                      
+                      return (
+                        <TableRow 
+                          key={formatDate(day)}
+                          className={`${isFutureDay ? "opacity-60" : ""} ${isToday(day) ? "bg-blue-50 dark:bg-blue-900/20 font-medium" : ""}`}
+                        >
+                          <TableCell>
+                            {isToday(day) ? (
+                              <div className="flex items-center">
+                                <Clock className="h-4 w-4 text-blue-500 ml-1" />
+                                <span className="text-blue-600">{formatDateForDisplay(day, 'EEEE')}</span>
+                              </div>
+                            ) : (
+                              formatDateForDisplay(day, 'EEEE')
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isToday(day) ? (
+                              <div className="flex items-center">
+                                <span className="inline-block px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                                  {formatDateForDisplay(day, 'd MMMM')}
+                                </span>
+                                <span className="mr-1 text-xs text-blue-500">(اليوم)</span>
+                              </div>
+                            ) : (
+                              formatDateForDisplay(day, 'd MMMM')
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isFri ? (
+                              <Badge variant="outline">يوم الجمعة</Badge>
+                            ) : record?.checkIn ? (
+                              record.checkIn
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isFri ? (
+                              <Badge variant="outline">يوم الجمعة</Badge>
+                            ) : record?.checkOut ? (
+                              record.checkOut
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isFri ? (
+                              <Badge variant="outline">إجازة</Badge>
+                            ) : isFutureDay ? (
+                              <span className="text-gray-400">لم يحن الوقت بعد</span>
+                            ) : record?.checkIn && record?.checkOut ? (
+                              <Badge variant="success">حضور كامل</Badge>
+                            ) : record?.checkIn ? (
+                              <Badge variant="warning">حضور جزئي</Badge>
+                            ) : (
+                              <Badge variant="destructive">غياب</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          ) : (
+            // Admin view - show all employees attendance
+            <>
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6">
+                <h3 className="text-lg font-medium mb-2 text-blue-800 dark:text-blue-200">إحصائيات الحضور للشهر الحالي: {formatDateForDisplay(currentMonth, 'MMMM yyyy')}</h3>
+                <p className="text-sm text-blue-600 dark:text-blue-300">اضغط على اسم أي موظف لعرض تفاصيل الحضور والانصراف</p>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-center">الموظف</TableHead>
+                                    }`}
+                                    style={{ width: `${attendanceRate}%` }}
+                                  />
+                                </div>
+                                <span>{attendanceRate}%</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              {/* Selected Employee Detailed Attendance */}
+              {selectedEmployee && (
+                <div className="mt-8 bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-blue-800 dark:text-blue-300">تفاصيل حضور {selectedEmployee.name}</h3>
+                      <p className="text-sm text-gray-500">لشهر {formatDateForDisplay(currentMonth, 'MMMM yyyy')}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="default" size="sm" onClick={() => {
+                        // Force data reload
+                        const testData = attendance.find(rec => 
+                          rec.employeeId === selectedEmployee.id && 
+                          rec.date.startsWith(`${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2, '0')}`)
+                        );
+                        
+                        // Output debug data
+                        console.log('Found attendance for', selectedEmployee.name, ':', testData);
+                        
+                        // Force refresh
+                        const emp = {...selectedEmployee};
+                        setSelectedEmployee(null);
+                        setTimeout(() => setSelectedEmployee(emp), 50);
+                      }}>
+                        تحديث البيانات
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setSelectedEmployee(null)}>
+                        إغلاق
+                      </Button>
+                    </div>
+                  </div>
+                  
+
+
+                  <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-center">اليوم</TableHead>
+                          <TableHead className="text-center">التاريخ</TableHead>
+                          <TableHead className="text-center">الحضور</TableHead>
+                          <TableHead className="text-center">الانصراف</TableHead>
+                          <TableHead className="text-center">الحالة</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {/* Generate days for the current month */}
+                        {daysInMonth.map(day => {
+                          // Format the date as YYYY-MM-DD for searching
+                          const dateStr = formatDate(day);
+                          
+                          // Get the actual attendance record from the main data
+                          const record = attendance.find(rec => 
+                            rec.employeeId === selectedEmployee.id && 
+                            rec.date === dateStr
+                          );
+                          
+                          // Check day types
+                          const isFri = isFriday(day);
+                          const isFutureDay = isFuture(day);
+                          const isCurrentDay = isToday(day);
+                          
+                          // Determine attendance status
+                          let status, statusColor;
+                          if (isFri) {
+                            status = "إجازة";
+                            statusColor = "outline";
+                          } else if (isFutureDay) {
+                            status = "لم يحن الوقت بعد";
+                            statusColor = "outline";
+                          } else if (record?.checkIn && record?.checkOut) {
+                            status = "حضور كامل";
+                            statusColor = "success";
+                          } else if (record?.checkIn) {
+                            status = "حضور جزئي";
+                            statusColor = "warning";
+                          } else {
+                            status = "غياب";
+                            statusColor = "destructive";
+                          }
+                          
+                          return (
+                            <TableRow 
+                              key={dateStr}
+                              className={`
+                                ${isFutureDay ? "opacity-60" : ""} 
+                                ${isCurrentDay ? "bg-blue-50 dark:bg-blue-900/20 font-medium" : ""}
+                              `}
+                            >
+                              <TableCell className="text-center">{formatDateForDisplay(day, 'EEEE')}</TableCell>
+                              <TableCell className="text-center">{formatDateForDisplay(day, 'd MMMM')}</TableCell>
+                              <TableCell className="text-center">
+                                {isFri ? (
+                                  <Badge variant="outline">يوم الجمعة</Badge>
+                                ) : record?.checkIn ? (
+                                  <span className="font-medium text-blue-600">{record.checkIn}</span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {isFri ? (
+                                  <Badge variant="outline">يوم الجمعة</Badge>
+                                ) : record?.checkOut ? (
+                                  <span className="font-medium text-green-600">{record.checkOut}</span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant={statusColor}>{status}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
